@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceEventEmitter } from "react-native";
+import { encode as encodeBase64 } from "base64-arraybuffer";
 
 const TOKEN_KEY = "@auth/token";
 
@@ -30,24 +31,10 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   return fetch(input, { ...init, headers });
 }
 
-// Helpers to create a mock JWT for development without Node Buffer
-function base64EncodeAscii(input: string): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-  let str = input;
-  let output = "";
-  for (let block = 0, charCode: number, i = 0, map = chars; str.charAt(i | 0) || ((map = "="), i % 1); output += map.charAt(63 & (block >> (8 - (i % 1) * 8)))) {
-    charCode = str.charCodeAt((i += 3 / 4));
-    if (charCode > 0xff) {
-      // Fallback: replace non-ASCII with '?' to keep it simple for dev mock
-      charCode = 63; // '?'
-    }
-    block = (block << 8) | (charCode || 0);
-  }
-  return output;
-}
-
+// Helpers to create a mock JWT for development using standard encoders
 function b64urlFromString(data: string): string {
-  const b64 = (globalThis as any).btoa ? (globalThis as any).btoa(data) : base64EncodeAscii(data);
+  const bytes = new TextEncoder().encode(data);
+  const b64 = encodeBase64(bytes.buffer);
   return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 

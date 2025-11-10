@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -10,164 +10,73 @@ import {
   Linking,
 } from "react-native";
 import sha256 from "js-sha256";
+import { encode as encodeBase64 } from "base64-arraybuffer";
 import { saveToken, makeMockJwt } from "../lib/auth";
+import { getProviders, beginLogin } from "../lib/api";
+import { API_BASE } from "../lib/config";
+import type { Provider } from "../types/api";
 
 // Simple in-memory map to keep verifier for a given state until exchange.
 const verifierByState = new Map<string, string>();
 
-// Tiny helpers to avoid Node Buffer dependency in React Native
-const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-function bytesToBase64(bytes: Uint8Array): string {
-  let out = "";
-  let i = 0;
-  const len = bytes.length;
-  while (i < len) {
-    const a = i < len ? bytes[i++] : 0;
-    const b = i < len ? bytes[i++] : 0;
-    const c = i < len ? bytes[i++] : 0;
-    const triplet = (a << 16) | (b << 8) | c;
-    out +=
-      B64_ALPHABET[(triplet >> 18) & 0x3f] +
-      B64_ALPHABET[(triplet >> 12) & 0x3f] +
-      (i - 1 > len ? "=" : B64_ALPHABET[(triplet >> 6) & 0x3f]) +
-      (i > len ? "=" : B64_ALPHABET[triplet & 0x3f]);
-  }
-  return out;
-}
-function base64ToUrlSafe(b64: string): string {
+// Helpers built on libraries: crypto.getRandomValues + base64-arraybuffer
+function toBase64Url(b64: string): string {
   return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.length % 2 === 0 ? hex : "0" + hex;
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
 function randomURLSafe(n: number) {
+  // PKCE code_verifier should be 43-128 chars; generate enough bytes and slice
   const arr = new Uint8Array(n);
-  for (let i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256);
-  const b64 = bytesToBase64(arr);
-  return base64ToUrlSafe(b64).slice(0, n);
+  crypto.getRandomValues(arr);
+  const b64 = encodeBase64(arr.buffer);
+  return toBase64Url(b64).slice(0, n);
 }
 
 function codeChallengeFromVerifier(verifier: string) {
-  // js-sha256 may export a function or offer a .create() builder depending on the bundle.
-  // Use a runtime fallback so TypeScript typing differences don't cause linter errors.
-  const hex =
-    typeof (sha256 as any).create === "function"
-      ? (sha256 as any).create().update(verifier).hex()
-      : (sha256 as any)(verifier);
-  const bytes = hexToBytes(hex);
-  const b64 = bytesToBase64(bytes);
-  return base64ToUrlSafe(b64);
+  // Use js-sha256 to get byte array, then base64url-encode via library
+  const arr: number[] =
+    typeof (sha256 as any).array === "function"
+      ? (sha256 as any).array(verifier)
+      : Array.from(new Uint8Array((sha256 as any).arrayBuffer?.(verifier) || []));
+  const bytes = new Uint8Array(arr);
+  const b64 = encodeBase64(bytes.buffer);
+  return toBase64Url(b64);
 }
 
 export default function AuthScreen() {
-  const [providers, setProviders] = useState<any[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(false);
-  const [apiBase, setApiBase] = useState<string>("http://10.0.2.2:8090");
-  const [detectingApi, setDetectingApi] = useState<boolean>(true);
 
   useEffect(() => {
     (async () => {
-      console.log("[AuthScreen] mount - starting API detection");
-      setDetectingApi(true);
-      const base = await findWorkingApiBase();
-      console.log("[AuthScreen] detected api base:", base);
-      setApiBase(base);
-      setDetectingApi(false);
-      await fetchProviders(base);
+      await fetchProviders();
     })();
   }, []);
 
-  // Try common emulator / local addresses and return the first working one.
-  async function findWorkingApiBase(): Promise<string> {
-    const candidates = [
-      "http://172.29.47.123:8090", // Genymotion
-      //"http://localhost:8090", // when emulator maps localhost
-    ];
-    const timeoutMs = 2000;
-    for (const c of candidates) {
-      console.log("[AuthScreen] trying api candidate:", c);
-      // use AbortController so a hanging fetch doesn't block other candidates
-      const controller = new (globalThis as any).AbortController();
-      const timer = setTimeout(() => {
-        try {
-          controller.abort();
-        } catch {}
-      }, timeoutMs);
-      try {
-        const res = await fetch(`${c}/api/providers`, { method: "GET", signal: controller.signal });
-        clearTimeout(timer);
-        console.log("[AuthScreen] candidate response status for", c, "->", res.status);
-        if (res && (res.ok || res.status === 200)) {
-          console.log("[AuthScreen] working api base found:", c);
-          return c;
-        }
-      } catch (e: any) {
-        clearTimeout(timer);
-        const msg = e?.name === "AbortError" ? "timeout" : e?.message || e;
-        console.warn("[AuthScreen] candidate failed:", c, msg);
-        // ignore and try next candidate
-      }
-    }
-    // fallback to the AVD address which is commonly correct
-    return "http://10.0.2.2:8090";
-  }
-
-  async function fetchProviders(base?: string) {
+  const fetchProviders = useCallback(async () => {
     setLoading(true);
-    const host = base || apiBase;
     try {
-      console.log("[AuthScreen] fetchProviders -> url:", `${host}/api/providers`);
-      const res = await fetch(`${host}/api/providers`);
-      console.log("[AuthScreen] fetchProviders response status:", res.status);
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = text;
-      }
-      console.log("[AuthScreen] fetchProviders response body:", data);
-      setProviders(Array.isArray(data) ? data : []);
+      const data = await getProviders();
+      setProviders(data);
     } catch (err: any) {
       console.error("[AuthScreen] fetchProviders error:", err);
       Alert.alert(
         "Error loading providers",
-        `${err?.message || "failed to load providers"}\nTried: ${host}\nIf you're on Android emulator use 10.0.2.2 (AVD) or 10.0.3.2 (Genymotion), or use your PC LAN IP and ensure the server listens on 0.0.0.0.`
+        `${err?.message || "failed to load providers"}\nServer: ${API_BASE}`
       );
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function handleProviderPress(provider: any) {
+  const handleProviderPress = useCallback(async (provider: Provider) => {
     setLoading(true);
     try {
-      console.log("[AuthScreen] handleProviderPress:", provider);
       // mobile generates verifier + challenge
       const verifier = randomURLSafe(64);
       const challenge = codeChallengeFromVerifier(verifier);
-      console.log("[AuthScreen] generated verifier/challenge", { verifier: "(hidden)", challenge });
 
       // call server login endpoint
-      console.log("[AuthScreen] POST to login:", `${apiBase}/api/user/login`);
-      const resp = await fetch(`${apiBase}/api/user/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: provider.Provider || provider.provider || provider, code_challenge: challenge }),
-      });
-      console.log("[AuthScreen] login response status:", resp.status);
-      if (!resp.ok) {
-        const txt = await resp.text();
-        console.warn("[AuthScreen] login failed body:", txt);
-        throw new Error(txt || "login failed");
-      }
-      const json = await resp.json();
-      console.log("[AuthScreen] login response json:", json);
+      const json = await beginLogin(undefined, provider.Provider, challenge);
       const { auth_url, state } = json;
       if (!auth_url) throw new Error("no auth_url returned");
 
@@ -175,7 +84,6 @@ export default function AuthScreen() {
       if (state) verifierByState.set(state, verifier);
 
       // open system browser with auth_url
-      console.log("[AuthScreen] opening auth_url:", auth_url);
       await Linking.openURL(auth_url);
     } catch (err: any) {
       console.error("[AuthScreen] handleProviderPress error:", err);
@@ -183,7 +91,7 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   // --- Deep link handling (warden://auth/callback?provider=yandex&code=...&state=...) ---
   function parseQuery(url: string): Record<string, string> {
@@ -208,9 +116,8 @@ export default function AuthScreen() {
     }
   }
 
-  const handleRedirect = async (url: string) => {
+  const handleRedirect = useCallback(async (url: string) => {
     try {
-      console.log("[AuthScreen] handleRedirect url:", url);
       const params = parseQuery(url);
       const provider = params["provider"] || "yandex";
       const code = params["code"];
@@ -243,7 +150,7 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const onUrl = ({ url }: { url: string }) => handleRedirect(url);
@@ -260,7 +167,21 @@ export default function AuthScreen() {
       if (sub && typeof sub.remove === "function") sub.remove();
       else if ((Linking as any).removeEventListener) (Linking as any).removeEventListener("url", onUrl);
     };
-  }, [apiBase]);
+  }, []);
+
+  const keyExtractor = useCallback((item: Provider) => item.Provider, []);
+  const renderItem = useCallback(
+    ({ item }: { item: Provider }) => (
+      <TouchableOpacity style={styles.item} onPress={() => handleProviderPress(item)}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name}>{item.Name ?? item.Provider}</Text>
+          <Text style={styles.small}>{item.Provider}</Text>
+        </View>
+        <Text style={styles.go}>Open</Text>
+      </TouchableOpacity>
+    ),
+    [handleProviderPress]
+  );
 
   return (
     <View style={styles.container}>
