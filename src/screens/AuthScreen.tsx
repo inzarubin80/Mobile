@@ -46,6 +46,12 @@ export default function AuthScreen() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Lightweight debugger with consistent prefix
+  const debug = useCallback((msg: string, extra?: any) => {
+    // eslint-disable-next-line no-console
+    console.log(`[AuthScreen] ${msg}`, extra ?? "");
+  }, []);
+
   useEffect(() => {
     (async () => {
       await fetchProviders();
@@ -55,7 +61,13 @@ export default function AuthScreen() {
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
+      debug("fetchProviders -> GET", API_BASE + "/api/providers");
       const data = await getProviders();
+      const keys = (data || []).map((p) => p?.Provider).filter(Boolean);
+      const duplicates = keys.filter((k, i) => keys.indexOf(k) !== i);
+      if (duplicates.length) {
+        console.warn("[AuthScreen] duplicate provider keys detected:", Array.from(new Set(duplicates)));
+      }
       setProviders(data);
     } catch (err: any) {
       console.error("[AuthScreen] fetchProviders error:", err);
@@ -68,6 +80,14 @@ export default function AuthScreen() {
     }
   }, []);
 
+  // Log state changes relevant to layout updates
+  useEffect(() => {
+    debug("providers changed, count:", providers?.length ?? 0);
+  }, [providers, debug]);
+  useEffect(() => {
+    debug("loading:", loading);
+  }, [loading, debug]);
+
   const handleProviderPress = useCallback(async (provider: Provider) => {
     setLoading(true);
     try {
@@ -76,6 +96,7 @@ export default function AuthScreen() {
       const challenge = codeChallengeFromVerifier(verifier);
 
       // call server login endpoint
+      debug("beginLogin", { provider: provider.Provider });
       const json = await beginLogin(undefined, provider.Provider, challenge);
       const { auth_url, state } = json;
       if (!auth_url) throw new Error("no auth_url returned");
@@ -169,40 +190,52 @@ export default function AuthScreen() {
     };
   }, []);
 
-  const keyExtractor = useCallback((item: Provider) => item.Provider, []);
-  const renderItem = useCallback(
-    ({ item }: { item: Provider }) => (
-      <TouchableOpacity style={styles.item} onPress={() => handleProviderPress(item)}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.name}>{item.Name ?? item.Provider}</Text>
-          <Text style={styles.small}>{item.Provider}</Text>
-        </View>
-        <Text style={styles.go}>Open</Text>
-      </TouchableOpacity>
-    ),
-    [handleProviderPress]
+  const keyExtractor = useCallback((item: Provider, index: number) => {
+    const key = item?.Provider ?? `idx-${index}`;
+    if (!item?.Provider) {
+      console.warn("[AuthScreen] missing Provider key at index", index, item);
+    }
+    return key;
+  }, []);
+
+  const ProviderItem = useCallback(
+    ({ item }: { item: Provider }) => {
+      useEffect(() => {
+        debug("mount row", item.Provider);
+        return () => debug("unmount row", item.Provider);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [item.Provider]);
+      return (
+        <TouchableOpacity style={styles.item} onPress={() => handleProviderPress(item)}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.name}>{item.Name ?? item.Provider}</Text>
+            <Text style={styles.small}>{item.Provider}</Text>
+          </View>
+          <Text style={styles.go}>Open</Text>
+        </TouchableOpacity>
+      );
+    },
+    [handleProviderPress, debug]
   );
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Sign in</Text>
-      {loading ? (
+      <FlatList
+        data={providers}
+        keyExtractor={keyExtractor}
+        renderItem={({ item }) => <ProviderItem item={item} />}
+        ListEmptyComponent={!loading ? <Text style={styles.small}>No providers</Text> : null}
+        removeClippedSubviews={false}
+      />
+      <View
+        style={[
+          styles.loadingOverlay,
+          { opacity: loading ? 1 : 0, pointerEvents: loading ? "auto" : "none" },
+        ]}
+      >
         <ActivityIndicator />
-      ) : (
-        <FlatList
-          data={providers}
-          keyExtractor={(i) => i.Provider}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.item} onPress={() => handleProviderPress(item)}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{item.Name ?? item.Provider}</Text>
-                <Text style={styles.small}>{item.Provider}</Text>
-              </View>
-              <Text style={styles.go}>Open</Text>
-            </TouchableOpacity>
-          )}
-        />
-      )}
+      </View>
     </View>
   );
 }
@@ -214,6 +247,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "600" },
   small: { color: "#666", fontSize: 12 },
   go: { color: "#007aff", fontWeight: "600" },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
 });
 
 
