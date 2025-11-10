@@ -15,6 +15,7 @@ import { saveToken, makeMockJwt } from "../lib/auth";
 import { getProviders, beginLogin } from "../lib/api";
 import { API_BASE } from "../lib/config";
 import type { Provider } from "../types/api";
+import queryString from "query-string";
 
 // Simple in-memory map to keep verifier for a given state until exchange.
 const verifierByState = new Map<string, string>();
@@ -116,25 +117,14 @@ export default function AuthScreen() {
 
   // --- Deep link handling (warden://auth/callback?provider=yandex&code=...&state=...) ---
   function parseQuery(url: string): Record<string, string> {
-    try {
-      // Prefer WHATWG URL if available
-      // Ensure proper scheme handling by replacing spaces
-      const u = new (globalThis as any).URL(url);
-      const out: Record<string, string> = {};
-      (u.searchParams as any).forEach((v: string, k: string) => (out[k] = v));
-      return out;
-    } catch {
-      const qIndex = url.indexOf("?");
-      if (qIndex === -1) return {};
-      const query = url.slice(qIndex + 1);
-      const out: Record<string, string> = {};
-      for (const part of query.split("&")) {
-        const [k, v] = part.split("=");
-        if (!k) continue;
-        out[decodeURIComponent(k)] = decodeURIComponent(v || "");
-      }
-      return out;
-    }
+    const parsed = queryString.parseUrl(url);
+    const q = parsed.query as Record<string, string | string[]>;
+    const out: Record<string, string> = {};
+    Object.keys(q).forEach((k) => {
+      const v = q[k];
+      out[k] = Array.isArray(v) ? String(v[0] ?? "") : String(v ?? "");
+    });
+    return out;
   }
 
   const handleRedirect = useCallback(async (url: string) => {
