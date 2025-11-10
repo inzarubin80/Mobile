@@ -48,5 +48,15 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<!-- Deep link URL scheme for OAuth callback: warden://auth/callback -->
+	<key>CFBundleURLTypes</key>
+	<Array>
+		<Dict>
+			<key>CFBundleURLSchemes</key>
+			<Array>
+				<String>warden</String>
+			</Array>
+		</Dict>
+	</Array>
 </dict>
 </plist>
