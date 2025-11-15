@@ -11,8 +11,8 @@ import {
 } from "react-native";
 import sha256 from "js-sha256";
 import { encode as encodeBase64 } from "base64-arraybuffer";
-import { saveToken, makeMockJwt } from "../lib/auth";
-import { getProviders, beginLogin } from "../lib/api";
+import { saveToken } from "../lib/auth";
+import { getProviders, beginLogin, exchangeCode } from "../lib/api";
 import { API_BASE } from "../lib/config";
 import type { Provider } from "../types/api";
 import queryString from "query-string";
@@ -147,14 +147,21 @@ export default function AuthScreen() {
       const verifier = verifierByState.get(state);
       if (!verifier) {
         console.warn("[AuthScreen] no verifier for state", state);
-        return;
+        // continue without code_verifier if server doesn't enforce it yet
       }
       setLoading(true);
-      // MOCK EXCHANGE: generate local JWT for dev flow
-      const jwt = makeMockJwt({ id: "mock-user", name: "Mock User" });
-      await saveToken(jwt);
+      // Real exchange for token
+      const resp = await exchangeCode({
+        provider,
+        code,
+        state,
+        code_verifier: verifier || undefined,
+      });
+      const token = (resp as any).token || (resp as any).access_token;
+      if (!token) throw new Error("No token in exchange response");
+      await saveToken(token);
       verifierByState.delete(state);
-      Alert.alert("Success", "Authenticated successfully (mock)");
+      Alert.alert("Success", "Authenticated successfully");
     } catch (err: any) {
       console.error("[AuthScreen] handleRedirect error:", err);
       Alert.alert("Exchange error", err?.message || String(err));

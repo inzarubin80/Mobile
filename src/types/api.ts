@@ -20,4 +20,37 @@ export interface OAuthError {
 
 export type ProvidersResponse = Provider[];
 
+export interface ExchangeRequest {
+  provider: string;
+  code: string;
+  state?: string;
+  code_verifier?: string;
+}
+
+export interface ExchangeResponse {
+  token?: string;
+  access_token?: string;
+  refresh_token?: string;
+  [key: string]: any;
+}
+
+// Violations
+export type ViolationType = "garbage" | "pollution" | "air" | "deforestation" | "other";
+
+export interface ViolationPhoto {
+  id: string;
+  url: string;
+  thumb_url?: string;
+}
+
+export interface CreateViolationResponse {
+  id: string;
+  created_at?: string;
+  type: ViolationType;
+  description?: string;
+  lat: number;
+  lng: number;
+  photos?: ViolationPhoto[];
+}
+
 
