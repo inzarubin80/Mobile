@@ -15,7 +15,9 @@ import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
 import Geolocation from "react-native-geolocation-service";
 import { PermissionsAndroid, Platform } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { createViolation, getViolationsByBbox } from "../lib/api";
+import type { Violation } from "../types/api";
 
 // TODO: замените на ваш Yandex Maps JS API ключ
 const YANDEX_API_KEY = "REPLACE_WITH_YOUR_YANDEX_JS_API_KEY";
@@ -94,6 +96,11 @@ const createHtml = (apiKey: string) => `<!doctype html>
                 const pm = createPlacemark(m.coords, m.iconUrl);
                 placemarks[m.id] = pm;
                 clusterer.add(pm);
+                try {
+                  pm.events.add('click', function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type:'markerClicked', id: m.id }));
+                  });
+                } catch(e) {}
               });
             } catch(e) {}
           }
@@ -108,6 +115,7 @@ const createHtml = (apiKey: string) => `<!doctype html>
 </html>`;
 
 export default function MainScreen() {
+  const navigation = useNavigation<any>();
   const webviewRef = useRef<WebView | null>(null);
   const [mode, setMode] = useState<"idle" | "picking" | "details">("idle");
   const [center, setCenter] = useState<number[] | null>(null);
@@ -115,6 +123,7 @@ export default function MainScreen() {
   const [draftPhotos, setDraftPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [draftCoords, setDraftCoords] = useState<number[] | null>(null);
   const [lastBbox, setLastBbox] = useState<[number, number, number, number] | null>(null);
+  const [violations, setViolations] = useState<Violation[]>([]);
 
   const html = useMemo(() => createHtml(YANDEX_API_KEY), []);
 
@@ -130,8 +139,14 @@ export default function MainScreen() {
         // fire-and-forget load
         loadViolations(bbox);
       }
+      if (data.type === 'markerClicked' && data.id) {
+        const violation = violations.find(v => v.id === String(data.id));
+        if (violation) {
+          navigation.navigate("ViolationDetails", { violation });
+        }
+      }
     } catch {}
-  }, []);
+  }, [violations, navigation]);
 
   const postMessage = useCallback((msg: any) => {
     const json = JSON.stringify(msg);
@@ -271,6 +286,7 @@ export default function MainScreen() {
   const loadViolations = async (bbox: [number, number, number, number]) => {
     try {
       const resp = await getViolationsByBbox(bbox);
+      setViolations(resp.items || []);
       const items = (resp.items || []).map(v => ({
         id: v.id,
         coords: [v.lat, v.lng],
@@ -371,8 +387,6 @@ export default function MainScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* Убран модал экспорта/импорта */}
     </View>
   );
 }
@@ -426,6 +440,77 @@ const styles = StyleSheet.create({
   controlsRow: { position: 'absolute', left: 12, top: 12, flexDirection: 'row' },
   markerList: { position: 'absolute', left: 12, bottom: 12, width: 260, maxHeight: 260, backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 6 },
   markerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject as any,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 420,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '700' },
+  sheetSubtitle: { color: '#666', marginTop: 2, fontSize: 12 },
+  tabsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    gap: 8 as any,
+  },
+  tabBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#f2f3f5',
+  },
+  tabBtnActive: {
+    backgroundColor: '#007aff1a',
+  },
+  tabText: { color: '#555', fontWeight: '600' },
+  tabTextActive: { color: '#007aff' },
+  galleryImage: {
+    width: 160,
+    height: 120,
+    borderRadius: 10,
+    marginRight: 10,
+    backgroundColor: '#eee',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+  },
+  actionBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#007aff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 6,
+  },
+  actionText: {
+    color: '#007aff',
+    fontWeight: '700',
+  },
 });
 
 

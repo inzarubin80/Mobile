@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { StatusBar, StyleSheet, View, Text, TouchableOpacity } from "react-native";
 import MainScreen from "./src/screens/MainScreen";
 import AuthScreen from "./src/screens/AuthScreen";
+import ViolationDetailsScreen from "./src/screens/ViolationDetailsScreen";
 import { DeviceEventEmitter } from "react-native";
 import { loadToken, clearToken } from "./src/lib/auth";
 import { NavigationContainer } from "@react-navigation/native";
@@ -43,23 +44,33 @@ export default function App() {
         <Stack.Navigator>
           {ready ? (
             token ? (
-              <Stack.Screen
-                name="Main"
-                component={MainScreen}
-                options={{
-                  title: "Home",
-                  headerRight: () => (
-                    <TouchableOpacity
-                      onPress={async () => {
-                        await clearToken();
-                      }}
-                      style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 6 }}
-                    >
-                      <Text>Logout</Text>
-                    </TouchableOpacity>
-                  ),
-                }}
-              />
+              <>
+                <Stack.Screen
+                  name="Main"
+                  component={MainScreen}
+                  options={{
+                    title: "Home",
+                    headerRight: () => (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          await clearToken();
+                        }}
+                        style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 6 }}
+                      >
+                        <Text>Logout</Text>
+                      </TouchableOpacity>
+                    ),
+                  }}
+                />
+                <Stack.Screen
+                  name="ViolationDetails"
+                  component={ViolationDetailsScreen}
+                  options={{
+                    title: "Детали нарушения",
+                    presentation: "card",
+                  }}
+                />
+              </>
             ) : (
               <Stack.Screen
                 name="Auth"
