@@ -15,7 +15,7 @@ import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
 import Geolocation from "react-native-geolocation-service";
 import { PermissionsAndroid, Platform } from "react-native";
-import { createViolation } from "../lib/api";
+import { createViolation, getViolationsByBbox } from "../lib/api";
 
 // TODO: замените на ваш Yandex Maps JS API ключ
 const YANDEX_API_KEY = "REPLACE_WITH_YOUR_YANDEX_JS_API_KEY";
@@ -42,6 +42,16 @@ const createHtml = (apiKey: string) => `<!doctype html>
         try {
           const c = map.getCenter();
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'centerChanged', center: c }));
+          const b = map.getBounds(); // [[lat1, lon1], [lat2, lon2]]
+          if (b && b[0] && b[1]) {
+            const sw = b[0], ne = b[1];
+            const minLat = Math.min(sw[0], ne[0]);
+            const maxLat = Math.max(sw[0], ne[0]);
+            const minLng = Math.min(sw[1], ne[1]);
+            const maxLng = Math.max(sw[1], ne[1]);
+            const bbox = [minLng, minLat, maxLng, maxLat];
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'boundsChanged', bbox }));
+          }
         } catch(e) {}
       });
 
@@ -76,6 +86,17 @@ const createHtml = (apiKey: string) => `<!doctype html>
           if (msg.type === 'setCenter' && msg.coords) {
             map.setCenter(msg.coords, msg.zoom || map.getZoom());
           }
+          if (msg.type === 'setViolations' && Array.isArray(msg.items)) {
+            try {
+              clusterer.removeAll();
+              placemarks = {};
+              msg.items.forEach(function(m) {
+                const pm = createPlacemark(m.coords, m.iconUrl);
+                placemarks[m.id] = pm;
+                clusterer.add(pm);
+              });
+            } catch(e) {}
+          }
         } catch(e){}
       }
 
@@ -93,6 +114,7 @@ export default function MainScreen() {
   const [draftDescription, setDraftDescription] = useState("");
   const [draftPhotos, setDraftPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [draftCoords, setDraftCoords] = useState<number[] | null>(null);
+  const [lastBbox, setLastBbox] = useState<[number, number, number, number] | null>(null);
 
   const html = useMemo(() => createHtml(YANDEX_API_KEY), []);
 
@@ -101,6 +123,12 @@ export default function MainScreen() {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'centerChanged' && Array.isArray(data.center)) {
         setCenter(data.center);
+      }
+      if (data.type === 'boundsChanged' && Array.isArray(data.bbox) && data.bbox.length === 4) {
+        const bbox: [number, number, number, number] = [data.bbox[0], data.bbox[1], data.bbox[2], data.bbox[3]];
+        setLastBbox(bbox);
+        // fire-and-forget load
+        loadViolations(bbox);
       }
     } catch {}
   }, []);
@@ -224,8 +252,12 @@ export default function MainScreen() {
         lng,
         photos: draftPhotos,
       });
-      // Place marker locally for immediate feedback
-      postMessage({ type: 'addMarker', coords: draftCoords });
+      // Refresh violations for current bbox
+      if (lastBbox) {
+        await loadViolations(lastBbox);
+      } else {
+        postMessage({ type: "getCenter" });
+      }
       setDraftDescription("");
       setDraftPhotos([]);
       setDraftCoords(null);
@@ -233,6 +265,19 @@ export default function MainScreen() {
       Alert.alert("Отправлено", "Проблема создана");
     } catch (e: any) {
       Alert.alert("Ошибка отправки", e?.message || String(e));
+    }
+  };
+
+  const loadViolations = async (bbox: [number, number, number, number]) => {
+    try {
+      const resp = await getViolationsByBbox(bbox);
+      const items = (resp.items || []).map(v => ({
+        id: v.id,
+        coords: [v.lat, v.lng],
+      }));
+      postMessage({ type: "setViolations", items });
+    } catch (e) {
+      // ignore network errors here; user can retry by panning
     }
   };
 

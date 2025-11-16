@@ -1,4 +1,4 @@
-import { ExchangeRequest, ExchangeResponse, LoginResponse, Provider, ProvidersResponse, CreateViolationResponse, ViolationType } from "../types/api";
+import { ExchangeRequest, ExchangeResponse, LoginResponse, Provider, ProvidersResponse, CreateViolationResponse, ViolationType, Violation, Paged } from "../types/api";
 import { API_BASE } from "./config";
 import { apiFetch } from "./auth";
 
@@ -92,6 +92,21 @@ export async function createViolation(params: CreateViolationParams, base?: stri
     throw new Error(errText || `create violation failed (${res.status})`);
   }
   return parseJsonSafe<CreateViolationResponse>(res);
+}
+
+// Fetch violations by bbox only
+export async function getViolationsByBbox(
+  bbox: [number, number, number, number],
+  base?: string
+): Promise<Paged<Violation>> {
+  const host = base || API_BASE;
+  const qs = `bbox=${bbox.join(",")}`;
+  const res = await apiFetch(`${host}/api/violations?${qs}`, { method: "GET" });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `get violations failed (${res.status})`);
+  }
+  return parseJsonSafe<Paged<Violation>>(res);
 }
 
 

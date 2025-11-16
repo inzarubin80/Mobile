@@ -53,4 +53,22 @@ export interface CreateViolationResponse {
   photos?: ViolationPhoto[];
 }
 
+export interface Violation {
+  id: string;
+  type: ViolationType;
+  description?: string;
+  lat: number;
+  lng: number;
+  status?: string;
+  created_at?: string;
+  photos?: ViolationPhoto[];
+}
+
+export interface Paged<T> {
+  items: T[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 
