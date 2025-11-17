@@ -109,4 +109,34 @@ export async function getViolationsByBbox(
   return parseJsonSafe<Paged<Violation>>(res);
 }
 
+// Get violation by ID (public endpoint, no auth required)
+export async function getViolationById(id: string, base?: string): Promise<Partial<Violation>> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violations/${id}`;
+  console.log("[getViolationById] Fetching:", url);
+  const res = await fetch(url, { method: "GET" });
+  if (res.status === 404) {
+    throw new Error("violation not found");
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `get violation failed (${res.status})`);
+  }
+  const data = await parseJsonSafe<Partial<Violation>>(res);
+  console.log("[getViolationById] Raw response:", JSON.stringify(data, null, 2));
+  console.log("[getViolationById] Photos array:", data.photos);
+  console.log("[getViolationById] Photos count:", data.photos?.length || 0);
+  if (data.photos && data.photos.length > 0) {
+    data.photos.forEach((photo, idx) => {
+      console.log(`[getViolationById] Photo ${idx}:`, {
+        id: photo.id,
+        url: photo.url,
+        thumb_url: photo.thumb_url,
+      });
+    });
+  }
+  // Ensure id is set from path parameter
+  return { ...data, id };
+}
+
 

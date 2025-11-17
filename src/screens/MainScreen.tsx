@@ -1,28 +1,17 @@
-import React, { useRef, useCallback, useState, useMemo, useEffect } from "react";
-import {
-  View,
-  StyleSheet,
-  Text,
-  Button,
-  FlatList,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Alert,
-  Image,
-} from "react-native";
+import React, { useRef, useCallback, useState, useMemo } from "react";
+import { View, StyleSheet, Text, TouchableOpacity, Button, Alert } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
-import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import Geolocation from "react-native-geolocation-service";
 import { PermissionsAndroid, Platform } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { createViolation, getViolationsByBbox } from "../lib/api";
+import { getViolationsByBbox } from "../lib/api";
 import type { Violation } from "../types/api";
 
 // TODO: замените на ваш Yandex Maps JS API ключ
 const YANDEX_API_KEY = "REPLACE_WITH_YOUR_YANDEX_JS_API_KEY";
 
-const createHtml = (apiKey: string) => `<!doctype html>
+// HTML для встроенной карты Yandex Maps
+const createMapHtml = (apiKey: string) => `<!doctype html>
 <html>
 <head>
   <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
@@ -33,13 +22,12 @@ const createHtml = (apiKey: string) => `<!doctype html>
   <div id="map"></div>
   <script>
     ymaps.ready(init);
-    let map, placemarks = {}, clusterer;
+    let map, placemarks = {};
 
     function init() {
       map = new ymaps.Map('map', { center: [55.751244, 37.618423], zoom: 10 });
-      clusterer = new ymaps.Clusterer({ clusterDisableClickZoom: true });
-      map.geoObjects.add(clusterer);
 
+      // Отслеживание изменений видимой области карты
       map.events.add('boundschange', function() {
         try {
           const c = map.getCenter();
@@ -69,38 +57,38 @@ const createHtml = (apiKey: string) => `<!doctype html>
         return new ymaps.Placemark(coords, {}, { preset: 'islands#redDotIcon' });
       }
 
+      // Обработка сообщений от React Native
       function handleMessage(msgStr) {
         try {
           const msg = JSON.parse(msgStr);
-          if (msg.type === 'addMarker') {
-            const id = msg.id ?? ('m_' + Date.now());
-            const pm = createPlacemark(msg.coords, msg.iconUrl);
-            placemarks[id] = pm;
-            clusterer.add(pm);
-            window.ReactNativeWebView.postMessage(JSON.stringify({ type:'markerAdded', id, coords: msg.coords }));
-          }
+          
           if (msg.type === 'getCenter') {
             try {
               const c = map.getCenter();
               window.ReactNativeWebView.postMessage(JSON.stringify({ type:'centerChanged', center: c }));
             } catch(e) {}
           }
+          
           if (msg.type === 'setCenter' && msg.coords) {
             map.setCenter(msg.coords, msg.zoom || map.getZoom());
           }
+          
           if (msg.type === 'setViolations' && Array.isArray(msg.items)) {
             try {
-              clusterer.removeAll();
+              // Удаляем все существующие маркеры
+              Object.values(placemarks).forEach(function(pm) {
+                map.geoObjects.remove(pm);
+              });
               placemarks = {};
+              
+              // Добавляем новые маркеры напрямую на карту
               msg.items.forEach(function(m) {
                 const pm = createPlacemark(m.coords, m.iconUrl);
                 placemarks[m.id] = pm;
-                clusterer.add(pm);
-                try {
-                  pm.events.add('click', function() {
-                    window.ReactNativeWebView.postMessage(JSON.stringify({ type:'markerClicked', id: m.id }));
-                  });
-                } catch(e) {}
+                map.geoObjects.add(pm);
+                pm.events.add('click', function() {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type:'markerClicked', id: m.id }));
+                });
               });
             } catch(e) {}
           }
@@ -114,64 +102,113 @@ const createHtml = (apiKey: string) => `<!doctype html>
 </body>
 </html>`;
 
+type ScreenMode = "idle" | "picking";
+
 export default function MainScreen() {
   const navigation = useNavigation<any>();
   const webviewRef = useRef<WebView | null>(null);
-  const [mode, setMode] = useState<"idle" | "picking" | "details">("idle");
-  const [center, setCenter] = useState<number[] | null>(null);
-  const [draftDescription, setDraftDescription] = useState("");
-  const [draftPhotos, setDraftPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
-  const [draftCoords, setDraftCoords] = useState<number[] | null>(null);
-  const [lastBbox, setLastBbox] = useState<[number, number, number, number] | null>(null);
+
+  // Состояние экрана
+  const [mode, setMode] = useState<ScreenMode>("idle");
+  
+  // Состояние карты
+  const [mapCenter, setMapCenter] = useState<[number, number] | null>(null); // [lat, lng]
+  const [currentBbox, setCurrentBbox] = useState<[number, number, number, number] | null>(null); // [minLng, minLat, maxLng, maxLat]
   const [violations, setViolations] = useState<Violation[]>([]);
 
-  const html = useMemo(() => createHtml(YANDEX_API_KEY), []);
+  const mapHtml = useMemo(() => createMapHtml(YANDEX_API_KEY), []);
 
-  const onMessage = useCallback((event: WebViewMessageEvent) => {
+  // Отправка сообщения в WebView
+  const sendToMap = useCallback((msg: any) => {
+    const json = JSON.stringify(msg);
+    webviewRef.current?.postMessage(json);
+  }, []);
+
+  // Загрузка нарушений для видимой области карты
+  const loadViolations = useCallback(async (bbox: [number, number, number, number]) => {
+    try {
+      const resp = await getViolationsByBbox(bbox);
+      setViolations(resp.items || []);
+
+      // Отправляем маркеры на карту
+      const markers = (resp.items || []).map(v => ({
+        id: v.id,
+        coords: [v.lat, v.lng] as [number, number],
+        iconUrl: v.photos && v.photos.length > 0 ? (v.photos[0].thumb_url || v.photos[0].url) : undefined,
+      }));
+      sendToMap({ type: "setViolations", items: markers });
+    } catch (e) {
+      // Игнорируем ошибки сети - пользователь может повторить, переместив карту
+      console.warn("[MainScreen] Failed to load violations:", e);
+    }
+  }, [sendToMap]);
+
+  // Обработка сообщений от карты
+  const handleMapMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+
       if (data.type === 'centerChanged' && Array.isArray(data.center)) {
-        setCenter(data.center);
+        // data.center = [lat, lng]
+        setMapCenter([data.center[0], data.center[1]]);
       }
+
       if (data.type === 'boundsChanged' && Array.isArray(data.bbox) && data.bbox.length === 4) {
+        // data.bbox = [minLng, minLat, maxLng, maxLat]
         const bbox: [number, number, number, number] = [data.bbox[0], data.bbox[1], data.bbox[2], data.bbox[3]];
-        setLastBbox(bbox);
-        // fire-and-forget load
+        setCurrentBbox(bbox);
         loadViolations(bbox);
       }
+
       if (data.type === 'markerClicked' && data.id) {
         const violation = violations.find(v => v.id === String(data.id));
         if (violation) {
           navigation.navigate("ViolationDetails", { violation });
         }
       }
-    } catch {}
-  }, [violations, navigation]);
+    } catch (e) {
+      console.warn("[MainScreen] Failed to parse map message:", e);
+    }
+  }, [violations, navigation, loadViolations]);
 
-  const postMessage = useCallback((msg: any) => {
-    const json = JSON.stringify(msg);
-    webviewRef.current?.postMessage(json);
+  // Обновление нарушений при возврате на экран
+  useFocusEffect(
+    useCallback(() => {
+      if (currentBbox) {
+        loadViolations(currentBbox);
+      }
+    }, [currentBbox, loadViolations])
+  );
+
+  // ========== Действия для создания проблемы ==========
+
+  const startAddingProblem = useCallback(() => {
+    setMode("picking");
+    sendToMap({ type: "getCenter" });
+  }, [sendToMap]);
+
+  const confirmLocation = useCallback(() => {
+    if (mapCenter) {
+      setMode("idle");
+      navigation.navigate("AddViolation", {
+        initialCoords: mapCenter,
+        onSuccess: () => {
+          // Обновляем нарушения после успешного создания
+          if (currentBbox) {
+            loadViolations(currentBbox);
+          }
+        },
+      });
+    }
+  }, [mapCenter, navigation, currentBbox, loadViolations]);
+
+  const cancelLocationPicking = useCallback(() => {
+    setMode("idle");
   }, []);
 
-  // RN actions
-  const addMarkerFromRN = () => postMessage({ type: 'addMarker', coords: [55.76, 37.64] });
-  const getAllMarkers = () => postMessage({ type: 'getAllMarkers' });
-  const clearAll = () => postMessage({ type: 'clearAll' });
-  const centerOn = (coords: number[]) => postMessage({ type: 'setCenter', coords });
-  const removeMarker = (id: string) => postMessage({ type: 'removeMarker', id });
+  // ========== Геолокация ==========
 
-  // Problem flow actions
-  const startAddProblem = () => {
-    setMode("picking");
-    postMessage({ type: "getCenter" });
-  };
-  const confirmPicking = () => {
-    setDraftCoords(center || null);
-    setMode("details");
-  };
-  const cancelPicking = () => setMode("idle");
-
-  const ensureLocationPermission = async () => {
+  const requestLocationPermission = useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== "android") return true;
     const granted = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -182,24 +219,25 @@ export default function MainScreen() {
       }
     );
     return granted === PermissionsAndroid.RESULTS.GRANTED;
-  };
+  }, []);
 
-  const locateMe = async () => {
+  const moveToMyLocation = useCallback(async () => {
     try {
-      const ok = await ensureLocationPermission();
-      if (!ok) {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert("Нет доступа", "Разрешите доступ к геолокации в настройках");
         return;
       }
+
       Geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude, accuracy } = pos.coords;
           if (accuracy && accuracy > 100) {
             Alert.alert("Низкая точность", `Точность ${Math.round(accuracy)}м. Попробуйте ещё раз.`);
           }
-          const coords: number[] = [latitude, longitude];
-          postMessage({ type: "setCenter", coords, zoom: 18 });
-          setCenter(coords);
+          const coords: [number, number] = [latitude, longitude];
+          sendToMap({ type: "setCenter", coords, zoom: 18 });
+          setMapCenter(coords);
         },
         (err) => {
           Alert.alert("Ошибка геолокации", err?.message || "Не удалось получить координаты");
@@ -209,191 +247,60 @@ export default function MainScreen() {
     } catch (e: any) {
       Alert.alert("Ошибка", e?.message || String(e));
     }
-  };
-
-  const addPhoto = async () => {
-    const res = await launchImageLibrary({ mediaType: "photo", selectionLimit: 5 });
-    if (res?.assets?.length) {
-      const items = res.assets
-        .filter((a: Asset) => !!a.uri)
-        .map((a: Asset) => ({ uri: a.uri!, name: a.fileName || undefined, type: a.type || undefined }));
-      setDraftPhotos(prev => [...prev, ...items]);
-    }
-  };
-
-  const ensureCameraPermission = async () => {
-    if (Platform.OS !== "android") return true;
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.CAMERA,
-      {
-        title: "Доступ к камере",
-        message: "Нужен доступ к камере для съемки фото",
-        buttonPositive: "OK",
-      }
-    );
-    return granted === PermissionsAndroid.RESULTS.GRANTED;
-  };
-
-  const addPhotoFromCamera = async () => {
-    const ok = await ensureCameraPermission();
-    if (!ok) {
-      Alert.alert("Нет доступа", "Разрешите доступ к камере в настройках");
-      return;
-    }
-    const res = await launchCamera({
-      mediaType: "photo",
-      cameraType: "back",
-      quality: 0.8,
-      saveToPhotos: true,
-    });
-    if (res?.assets?.length) {
-      const items = res.assets
-        .filter((a: Asset) => !!a.uri)
-        .map((a: Asset) => ({ uri: a.uri!, name: a.fileName || undefined, type: a.type || undefined }));
-      setDraftPhotos(prev => [...prev, ...items]);
-    }
-  };
-  const removePhoto = (uri: string) => setDraftPhotos(prev => prev.filter(p => p.uri !== uri));
-
-  const submitProblem = async () => {
-    if (!draftCoords) { Alert.alert("Выберите место на карте"); return; }
-    if (!draftDescription.trim()) { Alert.alert("Добавьте описание"); return; }
-    try {
-      const [lat, lng] = draftCoords;
-      await createViolation({
-        type: "garbage",
-        description: draftDescription.trim(),
-        lat,
-        lng,
-        photos: draftPhotos,
-      });
-      // Refresh violations for current bbox
-      if (lastBbox) {
-        await loadViolations(lastBbox);
-      } else {
-        postMessage({ type: "getCenter" });
-      }
-      setDraftDescription("");
-      setDraftPhotos([]);
-      setDraftCoords(null);
-      setMode("idle");
-      Alert.alert("Отправлено", "Проблема создана");
-    } catch (e: any) {
-      Alert.alert("Ошибка отправки", e?.message || String(e));
-    }
-  };
-
-  const loadViolations = async (bbox: [number, number, number, number]) => {
-    try {
-      const resp = await getViolationsByBbox(bbox);
-      setViolations(resp.items || []);
-      const items = (resp.items || []).map(v => ({
-        id: v.id,
-        coords: [v.lat, v.lng],
-      }));
-      postMessage({ type: "setViolations", items });
-    } catch (e) {
-      // ignore network errors here; user can retry by panning
-    }
-  };
-
-  // Убраны вспомогательные демо-действия с маркерами
+  }, [requestLocationPermission, sendToMap]);
 
   return (
     <View style={styles.container}>
       <WebView
         ref={webviewRef}
         originWhitelist={["*"]}
-        source={{ html }}
-        onMessage={onMessage}
+        source={{ html: mapHtml }}
+        onMessage={handleMapMessage}
         javaScriptEnabled
         domStorageEnabled
         style={styles.webview}
       />
 
-      {/* FAB */}
+      {/* Кнопка добавления проблемы */}
       {mode === "idle" && (
-        <TouchableOpacity onPress={startAddProblem} style={styles.fab}>
-          <Text style={{ color: "#fff", fontSize: 24, fontWeight: "700" }}>＋</Text>
+        <TouchableOpacity onPress={startAddingProblem} style={styles.fab}>
+          <Text style={styles.fabText}>＋</Text>
         </TouchableOpacity>
       )}
 
-      {/* Picking overlay */}
+      {/* Оверлей выбора места на карте */}
       {mode === "picking" && (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <View style={styles.crosshair} />
           <View style={styles.bottomBar}>
-            <Text style={{ fontWeight: "600" }}>
-              {center ? `${center[0].toFixed(5)}, ${center[1].toFixed(5)}` : "..."}
+            <Text style={styles.coordsText}>
+              {mapCenter ? `${mapCenter[0].toFixed(5)}, ${mapCenter[1].toFixed(5)}` : "..."}
             </Text>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={{ marginRight: 12 }}>
-                <Button title="Моё место" onPress={locateMe} />
+            <View style={styles.buttonsRow}>
+              <View style={styles.buttonWrapper}>
+                <Button title="Моё место" onPress={moveToMyLocation} />
               </View>
-              <View style={{ marginRight: 12 }}>
-                <Button title="Отмена" onPress={cancelPicking} />
+              <View style={styles.buttonWrapper}>
+                <Button title="Отмена" onPress={cancelLocationPicking} />
               </View>
-              <View>
-                <Button title="Подтвердить" onPress={confirmPicking} />
+              <View style={styles.buttonWrapper}>
+                <Button title="Подтвердить" onPress={confirmLocation} />
               </View>
             </View>
           </View>
         </View>
       )}
-
-      {/* Убраны демо-кнопки и список маркеров */}
-
-      {/* Details modal */}
-      <Modal visible={mode === "details"} animationType="slide" onRequestClose={() => setMode("idle")}>
-        <View style={{ flex: 1, padding: 12 }}>
-          <Text style={{ fontWeight: '700', fontSize: 16, marginBottom: 8 }}>Новая проблема</Text>
-          <Text style={{ color: "#666", marginBottom: 8 }}>
-            Координаты: {draftCoords ? `${draftCoords[0].toFixed(5)}, ${draftCoords[1].toFixed(5)}` : "не выбрано"}
-          </Text>
-          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Описание</Text>
-          <TextInput
-            multiline
-            value={draftDescription}
-            onChangeText={setDraftDescription}
-            placeholder="Например: незаконная свалка в лесу"
-            style={{ height: 120, borderWidth: 1, borderColor: '#ccc', padding: 8, borderRadius: 6, marginBottom: 12 }}
-          />
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ fontWeight: '600' }}>Фотографии ({draftPhotos.length})</Text>
-            <View style={{ flexDirection: 'row' }}>
-              <View style={{ marginRight: 8 }}>
-                <Button title="Сделать фото" onPress={addPhotoFromCamera} />
-              </View>
-              <Button title="Галерея" onPress={addPhoto} />
-            </View>
-          </View>
-          <FlatList
-            horizontal
-            data={draftPhotos}
-            keyExtractor={(i) => i.uri}
-            renderItem={({ item }) => (
-              <View style={{ marginRight: 8, alignItems: 'center' }}>
-                <Image source={{ uri: item.uri }} style={{ width: 96, height: 96, borderRadius: 6, backgroundColor: '#eee' }} />
-                <TouchableOpacity onPress={() => removePhoto(item.uri)}>
-                  <Text style={{ color: '#d00', marginTop: 4 }}>Удалить</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            style={{ marginBottom: 16 }}
-          />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Button title="Изменить на карте" onPress={() => setMode("picking")} />
-            <Button title="Отправить" onPress={submitProblem} />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webview: { flex: 1 },
+  container: {
+    flex: 1,
+  },
+  webview: {
+    flex: 1,
+  },
   fab: {
     position: 'absolute',
     right: 16,
@@ -405,6 +312,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 3,
+  },
+  fabText: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "700",
   },
   crosshair: {
     position: 'absolute',
@@ -430,88 +342,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  controls: {
-    position: 'absolute',
-    right: 12,
-    bottom: 12,
-    backgroundColor: 'transparent',
-    flexDirection: 'column',
+  coordsText: {
+    fontWeight: "600",
   },
-  controlsRow: { position: 'absolute', left: 12, top: 12, flexDirection: 'row' },
-  markerList: { position: 'absolute', left: 12, bottom: 12, width: 260, maxHeight: 260, backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 6 },
-  markerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  sheetBackdrop: {
-    ...StyleSheet.absoluteFillObject as any,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  buttonsRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 420,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#eee',
-  },
-  sheetTitle: { fontSize: 16, fontWeight: '700' },
-  sheetSubtitle: { color: '#666', marginTop: 2, fontSize: 12 },
-  tabsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    gap: 8 as any,
-  },
-  tabBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#f2f3f5',
-  },
-  tabBtnActive: {
-    backgroundColor: '#007aff1a',
-  },
-  tabText: { color: '#555', fontWeight: '600' },
-  tabTextActive: { color: '#007aff' },
-  galleryImage: {
-    width: 160,
-    height: 120,
-    borderRadius: 10,
-    marginRight: 10,
-    backgroundColor: '#eee',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#eee',
-  },
-  actionBtn: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: '#007aff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 6,
-  },
-  actionText: {
-    color: '#007aff',
-    fontWeight: '700',
+  buttonWrapper: {
+    marginRight: 12,
   },
 });
-
-
-

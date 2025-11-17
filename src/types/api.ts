@@ -54,13 +54,14 @@ export interface CreateViolationResponse {
 }
 
 export interface Violation {
-  id: string;
-  type: ViolationType;
+  id?: string; // Optional for API response (may not be in detail endpoint)
+  type?: ViolationType; // Optional for detail endpoint
   description?: string;
   lat: number;
   lng: number;
   status?: string;
   created_at?: string;
+  user_id?: number; // From detail endpoint
   photos?: ViolationPhoto[];
 }
 

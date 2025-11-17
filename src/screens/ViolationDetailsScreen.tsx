@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -11,12 +11,14 @@ import {
   Modal,
   TextInput,
   Share,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import type { Violation } from "../types/api";
+import { getViolationById } from "../lib/api";
 
 type RootStackParamList = {
-  ViolationDetails: { violation: Violation };
+  ViolationDetails: { violation: Violation; id?: string };
 };
 
 type ViolationDetailsRouteProp = RouteProp<RootStackParamList, "ViolationDetails">;
@@ -24,11 +26,74 @@ type ViolationDetailsRouteProp = RouteProp<RootStackParamList, "ViolationDetails
 export default function ViolationDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute<ViolationDetailsRouteProp>();
-  const { violation } = route.params;
+  const { violation: initialViolation, id } = route.params;
+  const [violation, setViolation] = useState<Violation>(initialViolation);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"gallery" | "chat">("gallery");
   const [showResolutionForm, setShowResolutionForm] = useState(false);
   const [resolutionType, setResolutionType] = useState<"resolved" | "partially" | null>(null);
   const [resolutionComment, setResolutionComment] = useState("");
+  const isMountedRef = useRef(true);
+
+  // Log lifecycle events and set mounted flag
+  useEffect(() => {
+    console.log("[ViolationDetails] Component mounted");
+    isMountedRef.current = true;
+    return () => {
+      console.log("[ViolationDetails] Component unmounting");
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Log navigation events
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", () => {
+      console.log("[ViolationDetails] Navigation: beforeRemove");
+      isMountedRef.current = false;
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  // Load violation details on mount if we have an ID
+  useEffect(() => {
+    const violationId = id || initialViolation.id;
+    console.log("[ViolationDetails] Initial violation:", JSON.stringify(initialViolation, null, 2));
+    console.log("[ViolationDetails] Initial photos:", initialViolation.photos);
+    if (violationId) {
+      setLoading(true);
+      setError(null);
+      getViolationById(violationId)
+        .then((data) => {
+          // Check if component is still mounted before updating state
+          if (!isMountedRef.current) {
+            console.log("[ViolationDetails] Component unmounted, skipping state update");
+            return;
+          }
+          console.log("[ViolationDetails] Loaded data:", JSON.stringify(data, null, 2));
+          console.log("[ViolationDetails] Loaded photos:", data.photos);
+          // Merge loaded data with initial data (initial takes precedence for fields like type, status)
+          setViolation((prev) => {
+            const merged = { ...prev, ...data, id: violationId };
+            console.log("[ViolationDetails] Merged violation:", JSON.stringify(merged, null, 2));
+            console.log("[ViolationDetails] Merged photos:", merged.photos);
+            return merged;
+          });
+          setLoading(false);
+        })
+        .catch((err) => {
+          // Check if component is still mounted before updating state
+          if (!isMountedRef.current) {
+            console.log("[ViolationDetails] Component unmounted, skipping error state update");
+            return;
+          }
+          console.error("[ViolationDetails] Failed to load:", err);
+          setError(err.message || "Не удалось загрузить данные");
+          setLoading(false);
+          // Keep initial violation data on error
+        });
+    }
+  }, [id, initialViolation.id]);
 
   // Показываем кнопки статусов только если проблема еще не решена
   const canMarkAsResolved = violation.status === "new" || violation.status === "in_progress" || !violation.status;
@@ -96,7 +161,8 @@ export default function ViolationDetailsScreen() {
     }
   }, []);
 
-  const getTypeLabel = useCallback((type: string) => {
+  const getTypeLabel = useCallback((type?: string) => {
+    if (!type) return "Нарушение";
     const labels: Record<string, string> = {
       garbage: "Мусор",
       pollution: "Загрязнение",
@@ -108,16 +174,51 @@ export default function ViolationDetailsScreen() {
   }, []);
 
   const photos = violation.photos || [];
+  
+  // Log photos for debugging (only once per violation change)
+  useEffect(() => {
+    console.log("[ViolationDetails] Violation changed, photos:", photos.length);
+    if (photos.length > 0) {
+      photos.forEach((photo, idx) => {
+        console.log(`[ViolationDetails] Photo ${idx}:`, {
+          id: photo.id,
+          url: photo.url,
+          thumb_url: photo.thumb_url,
+        });
+      });
+    }
+  }, [violation.id, photos.length]);
 
   return (
     <View style={styles.container}>
+      {/* Loading overlay - always mounted to prevent Fabric crashes */}
+      <View
+        style={[
+          styles.loadingOverlay,
+          { opacity: loading ? 1 : 0, pointerEvents: loading ? "auto" : "none" },
+        ]}
+      >
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Загрузка...</Text>
+      </View>
+      {/* Error banner - always mounted to prevent Fabric crashes */}
+      <View
+        style={[
+          styles.errorBanner,
+          { opacity: error && !loading ? 1 : 0, pointerEvents: error && !loading ? "auto" : "none" },
+        ]}
+      >
+        <Text style={styles.errorText}>{error || ""}</Text>
+      </View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
-            <View style={[styles.typeBadge, { backgroundColor: getTypeColor(violation.type) }]}>
-              <Text style={styles.typeText}>{getTypeLabel(violation.type)}</Text>
-            </View>
+            {violation.type && (
+              <View style={[styles.typeBadge, { backgroundColor: getTypeColor(violation.type) }]}>
+                <Text style={styles.typeText}>{getTypeLabel(violation.type)}</Text>
+              </View>
+            )}
             <Text style={styles.date}>{formatDate(violation.created_at)}</Text>
           </View>
           <Text style={styles.coords}>
@@ -146,51 +247,85 @@ export default function ViolationDetailsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Content */}
-        {activeTab === "gallery" ? (
-          <View style={styles.galleryContainer}>
-            {photos.length > 0 ? (
-              <FlatList
-                data={photos}
-                numColumns={2}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.photoItem} onPress={() => {}}>
-                    <Image
-                      source={{ uri: item.thumb_url || item.url }}
-                      style={styles.photo}
-                      resizeMode="cover"
-                    />
-                  </TouchableOpacity>
-                )}
-                scrollEnabled={false}
-                columnWrapperStyle={styles.photoRow}
-              />
-            ) : (
+        {/* Content - always mounted to prevent Fabric crashes */}
+        <View
+          style={[
+            styles.galleryContainer,
+            {
+              opacity: activeTab === "gallery" ? 1 : 0,
+              pointerEvents: activeTab === "gallery" ? "auto" : "none",
+            },
+          ]}
+        >
+          {/* FlatList always mounted to prevent Fabric crashes */}
+          <FlatList
+            data={photos.length > 0 ? photos : []}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => {
+              const imageUri = item.thumb_url || item.url;
+              return (
+                <TouchableOpacity style={styles.photoItem} onPress={() => {}}>
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={styles.photo}
+                    resizeMode="cover"
+                    onError={(e) => {
+                      if (isMountedRef.current) {
+                        console.error("[ViolationDetails] Image load error:", e.nativeEvent.error, "URI:", imageUri);
+                      }
+                    }}
+                    onLoad={() => {
+                      if (isMountedRef.current) {
+                        console.log("[ViolationDetails] Image loaded successfully:", imageUri);
+                      }
+                    }}
+                  />
+                </TouchableOpacity>
+              );
+            }}
+            scrollEnabled={false}
+            columnWrapperStyle={styles.photoRow}
+            ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>Нет фотографий</Text>
               </View>
-            )}
+            }
+            removeClippedSubviews={false}
+          />
+        </View>
+        <View
+          style={[
+            styles.chatContainer,
+            {
+              opacity: activeTab === "chat" ? 1 : 0,
+              pointerEvents: activeTab === "chat" ? "auto" : "none",
+            },
+          ]}
+        >
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>Чат будет доступен в ближайшее время</Text>
           </View>
-        ) : (
-          <View style={styles.chatContainer}>
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Чат будет доступен в ближайшее время</Text>
-            </View>
-          </View>
-        )}
+        </View>
 
-        {/* Primary Actions - Status buttons (if available) */}
-        {canMarkAsResolved && (
-          <View style={styles.primaryActions}>
-            <TouchableOpacity style={styles.resolvedButton} onPress={handleResolved}>
-              <Text style={styles.resolvedButtonText}>✓ Решено</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.partiallyButton} onPress={handlePartiallyResolved}>
-              <Text style={styles.partiallyButtonText}>~ Частично решено</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Primary Actions - Status buttons (always mounted to prevent Fabric crashes) */}
+        <View
+          style={[
+            styles.primaryActions,
+            {
+              opacity: canMarkAsResolved ? 1 : 0,
+              pointerEvents: canMarkAsResolved ? "auto" : "none",
+              height: canMarkAsResolved ? undefined : 0,
+            },
+          ]}
+        >
+          <TouchableOpacity style={styles.resolvedButton} onPress={handleResolved}>
+            <Text style={styles.resolvedButtonText}>✓ Решено</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.partiallyButton} onPress={handlePartiallyResolved}>
+            <Text style={styles.partiallyButtonText}>~ Частично решено</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Secondary Actions */}
         <View style={styles.secondaryActions}>
@@ -257,7 +392,8 @@ export default function ViolationDetailsScreen() {
   );
 }
 
-function getTypeColor(type: string): string {
+function getTypeColor(type?: string): string {
+  if (!type) return "#AA96DA";
   const colors: Record<string, string> = {
     garbage: "#FF6B6B",
     pollution: "#4ECDC4",
@@ -504,6 +640,33 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
+  },
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1000,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#666",
+  },
+  errorBanner: {
+    backgroundColor: "#FFE5E5",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#FFCCCC",
+  },
+  errorText: {
+    color: "#FF3B30",
+    fontSize: 14,
+    textAlign: "center",
   },
 });
 

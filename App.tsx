@@ -3,6 +3,7 @@ import { StatusBar, StyleSheet, View, Text, TouchableOpacity } from "react-nativ
 import MainScreen from "./src/screens/MainScreen";
 import AuthScreen from "./src/screens/AuthScreen";
 import ViolationDetailsScreen from "./src/screens/ViolationDetailsScreen";
+import AddViolationScreen from "./src/screens/AddViolationScreen";
 import { DeviceEventEmitter } from "react-native";
 import { loadToken, clearToken } from "./src/lib/auth";
 import { NavigationContainer } from "@react-navigation/native";
@@ -16,16 +17,27 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    console.log("[App] Component mounted");
     (async () => {
       const t = await loadToken();
+      console.log("[App] Token loaded:", t ? "exists" : "null");
       setToken(t);
       setReady(true);
+      console.log("[App] Ready state set to true");
     })();
     const sub = DeviceEventEmitter.addListener("auth:changed", (e: any) => {
+      console.log("[App] Auth changed event:", e?.token ? "token set" : "token cleared");
       setToken(e?.token || null);
     });
-    return () => sub.remove();
+    return () => {
+      console.log("[App] Component unmounting");
+      sub.remove();
+    };
   }, []);
+
+  useEffect(() => {
+    console.log("[App] State changed - ready:", ready, "token:", token ? "exists" : "null");
+  }, [ready, token]);
 
   function SplashScreen() {
     return (
@@ -67,6 +79,14 @@ export default function App() {
                   component={ViolationDetailsScreen}
                   options={{
                     title: "Детали нарушения",
+                    presentation: "card",
+                  }}
+                />
+                <Stack.Screen
+                  name="AddViolation"
+                  component={AddViolationScreen}
+                  options={{
+                    title: "Новая проблема",
                     presentation: "card",
                   }}
                 />
