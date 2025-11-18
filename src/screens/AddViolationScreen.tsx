@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -28,11 +28,22 @@ export default function AddViolationScreen() {
   const navigation = useNavigation();
   const route = useRoute<AddViolationRouteProp>();
   const { initialCoords } = route.params || {};
+  const isMountedRef = useRef(true);
 
   const [coords, setCoords] = useState<[number, number] | null>(initialCoords || null);
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Отслеживание монтирования компонента и очистка при размонтировании
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Очищаем фотографии при размонтировании для предотвращения утечек памяти и падений
+      setPhotos([]);
+    };
+  }, []);
 
   // ========== Работа с фотографиями ==========
 
@@ -61,7 +72,11 @@ export default function AddViolationScreen() {
         }));
       
       // Проверка на дубликаты URI
+      if (!isMountedRef.current) return;
+      
       setPhotos(prev => {
+        if (!isMountedRef.current) return prev;
+        
         const existingUris = new Set(prev.map(p => p.uri));
         
         // Сначала убираем дубликаты внутри новых фотографий
@@ -138,7 +153,11 @@ export default function AddViolationScreen() {
   }, [requestCameraPermission]);
 
   const removePhoto = useCallback((uri: string) => {
-    setPhotos(prev => prev.filter(p => p.uri !== uri));
+    if (!isMountedRef.current) return;
+    setPhotos(prev => {
+      if (!isMountedRef.current) return prev;
+      return prev.filter(p => p.uri !== uri);
+    });
   }, []);
 
   // ========== Выбор координат на карте ==========
@@ -192,17 +211,12 @@ export default function AddViolationScreen() {
       {/* Координаты */}
       <View style={styles.section}>
         <Text style={styles.label}>Местоположение</Text>
-        {coords ? (
+        {coords && (
           <View style={styles.coordsContainer}>
             <Text style={styles.coordsText}>
               {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
             </Text>
             <Button title="Изменить" onPress={selectLocationOnMap} />
-          </View>
-        ) : (
-          <View style={styles.noCoordsContainer}>
-            <Text style={styles.noCoordsText}>Координаты не выбраны</Text>
-            <Button title="Выбрать на карте" onPress={selectLocationOnMap} />
           </View>
         )}
       </View>
@@ -234,21 +248,42 @@ export default function AddViolationScreen() {
         {/* FlatList always mounted to prevent Fabric crashes */}
         <FlatList
           horizontal
-          data={photos}
+          data={photos.length > 0 ? photos : []}
           keyExtractor={(item, index) => {
             // Используем комбинацию URI и индекса для гарантии уникальности
             // Это защищает от случаев, когда URI может быть undefined или дублироваться
-            const key = item.uri || `photo_${index}_${Date.now()}`;
+            const key = item.uri || `photo_${index}`;
             return `${key}_${index}`;
           }}
-          renderItem={({ item, index }) => (
-            <View style={styles.photoItem}>
-              <Image source={{ uri: item.uri }} style={styles.photoPreview} />
-              <TouchableOpacity onPress={() => removePhoto(item.uri)}>
-                <Text style={styles.removePhotoText}>Удалить</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          renderItem={({ item, index }) => {
+            if (!item.uri) return null;
+            return (
+              <View style={styles.photoItem}>
+                <Image
+                  source={{ uri: item.uri }}
+                  style={styles.photoPreview}
+                  resizeMode="cover"
+                  onError={(e) => {
+                    if (isMountedRef.current) {
+                      console.warn("[AddViolationScreen] Image load error:", item.uri);
+                    }
+                  }}
+                  onLoad={() => {
+                    if (isMountedRef.current) {
+                      console.log("[AddViolationScreen] Image loaded:", item.uri);
+                    }
+                  }}
+                />
+                <TouchableOpacity onPress={() => {
+                  if (isMountedRef.current) {
+                    removePhoto(item.uri);
+                  }
+                }}>
+                  <Text style={styles.removePhotoText}>Удалить</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }}
           style={[
             styles.photosList,
             {
@@ -257,6 +292,7 @@ export default function AddViolationScreen() {
             },
           ]}
           ListEmptyComponent={null}
+          removeClippedSubviews={false}
         />
       </View>
 
