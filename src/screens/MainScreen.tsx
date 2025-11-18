@@ -192,15 +192,9 @@ export default function MainScreen() {
       setMode("idle");
       navigation.navigate("AddViolation", {
         initialCoords: mapCenter,
-        onSuccess: () => {
-          // Обновляем нарушения после успешного создания
-          if (currentBbox) {
-            loadViolations(currentBbox);
-          }
-        },
       });
     }
-  }, [mapCenter, navigation, currentBbox, loadViolations]);
+  }, [mapCenter, navigation]);
 
   const cancelLocationPicking = useCallback(() => {
     setMode("idle");

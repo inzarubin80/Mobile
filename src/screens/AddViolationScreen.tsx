@@ -19,7 +19,6 @@ import { createViolation } from "../lib/api";
 type RootStackParamList = {
   AddViolation: {
     initialCoords?: [number, number]; // [lat, lng]
-    onSuccess?: () => void;
   };
 };
 
@@ -28,7 +27,7 @@ type AddViolationRouteProp = RouteProp<RootStackParamList, "AddViolation">;
 export default function AddViolationScreen() {
   const navigation = useNavigation();
   const route = useRoute<AddViolationRouteProp>();
-  const { initialCoords, onSuccess } = route.params || {};
+  const { initialCoords } = route.params || {};
 
   const [coords, setCoords] = useState<[number, number] | null>(initialCoords || null);
   const [description, setDescription] = useState("");
@@ -64,7 +63,16 @@ export default function AddViolationScreen() {
       // Проверка на дубликаты URI
       setPhotos(prev => {
         const existingUris = new Set(prev.map(p => p.uri));
-        const uniqueNewPhotos = newPhotos.filter(p => !existingUris.has(p.uri));
+        
+        // Сначала убираем дубликаты внутри новых фотографий
+        const seenUris = new Set<string>();
+        const uniqueNewPhotos = newPhotos.filter(p => {
+          if (seenUris.has(p.uri) || existingUris.has(p.uri)) {
+            return false;
+          }
+          seenUris.add(p.uri);
+          return true;
+        });
         
         if (uniqueNewPhotos.length < newPhotos.length) {
           const duplicates = newPhotos.length - uniqueNewPhotos.length;
@@ -103,7 +111,16 @@ export default function AddViolationScreen() {
         // Проверка на дубликаты URI
         setPhotos(prev => {
           const existingUris = new Set(prev.map(p => p.uri));
-          const uniqueNewPhotos = newPhotos.filter(p => !existingUris.has(p.uri));
+          
+          // Сначала убираем дубликаты внутри новых фотографий
+          const seenUris = new Set<string>();
+          const uniqueNewPhotos = newPhotos.filter(p => {
+            if (seenUris.has(p.uri) || existingUris.has(p.uri)) {
+              return false;
+            }
+            seenUris.add(p.uri);
+            return true;
+          });
           
           if (uniqueNewPhotos.length < newPhotos.length) {
             const duplicates = newPhotos.length - uniqueNewPhotos.length;
@@ -133,7 +150,7 @@ export default function AddViolationScreen() {
 
   // ========== Отправка нарушения ==========
 
-  const submitViolation = useCallback(async () => {
+  const submitViolation = async () => {
     if (!coords) {
       Alert.alert("Ошибка", "Выберите место на карте");
       return;
@@ -145,6 +162,8 @@ export default function AddViolationScreen() {
     }
 
     setSubmitting(true);
+
+
     try {
       const [lat, lng] = coords;
       await createViolation({
@@ -155,23 +174,16 @@ export default function AddViolationScreen() {
         photos,
       });
 
-      // Вызываем callback успеха, если он есть
-      if (onSuccess) {
-        onSuccess();
-      }
+       
+      navigation.navigate('Main' as never)
+   
 
-      Alert.alert("Отправлено", "Проблема создана", [
-        {
-          text: "OK",
-          onPress: () => navigation.goBack(),
-        },
-      ]);
     } catch (e: any) {
       Alert.alert("Ошибка отправки", e?.message || String(e));
     } finally {
       setSubmitting(false);
     }
-  }, [coords, description, photos, onSuccess, navigation]);
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

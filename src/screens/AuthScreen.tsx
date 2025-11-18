@@ -1,3 +1,4 @@
+import 'react-native-get-random-values';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
