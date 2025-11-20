@@ -43,16 +43,75 @@ export async function beginLogin(baseOrProvider: string | undefined, providerOrC
 
 export async function exchangeCode(input: ExchangeRequest, base?: string): Promise<ExchangeResponse> {
   const host = base || API_BASE;
-  const res = await fetch(`${host}/api/user/exchange`, {
+  const url = `${host}/api/user/exchange`;
+  
+  // Используем apiFetch, чтобы куки автоматически сохранялись
+  const res = await apiFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+  
+  // Логируем куки, которые приходят в ответе (для отладки)
+  const setCookieHeader = res.headers.get('Set-Cookie');
+  if (setCookieHeader) {
+    console.log("[exchangeCode] Cookies received in response:", {
+      url,
+      setCookieHeader: setCookieHeader,
+      status: res.status
+    });
+  } else {
+    console.log("[exchangeCode] No Set-Cookie header in response");
+  }
+  
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(errText || `exchange failed (${res.status})`);
   }
   return parseJsonSafe<ExchangeResponse>(res);
+}
+
+export async function refreshToken(refreshToken: string | null, base?: string): Promise<ExchangeResponse> {
+  const host = base || API_BASE;
+  const body = refreshToken 
+    ? JSON.stringify({ refresh_token: refreshToken })
+    : JSON.stringify({});
+  
+  console.log("[refreshToken] Making refresh request:", {
+    url: `${host}/api/user/refresh`,
+    hasRefreshTokenInBody: !!refreshToken,
+    body: refreshToken ? "{ refresh_token: '***' }" : "{}"
+  });
+  
+  // Используем apiFetch вместо fetch, чтобы куки автоматически отправлялись
+  // apiFetch не будет делать refresh для /api/user/refresh (проверка в коде)
+  const res = await apiFetch(`${host}/api/user/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body,
+  });
+  
+  console.log("[refreshToken] Refresh response status:", res.status);
+  
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("[refreshToken] Refresh failed:", {
+      status: res.status,
+      error: errText
+    });
+    throw new Error(errText || `refresh failed (${res.status})`);
+  }
+  
+  // Парсим ответ и логируем его содержимое
+  const responseData = await parseJsonSafe<ExchangeResponse>(res);
+  console.log("[refreshToken] Refresh response data:", {
+    hasToken: !!(responseData.token || responseData.access_token),
+    hasRefreshToken: !!responseData.refresh_token,
+    hasUserId: !!(responseData as any).user_id,
+    responseKeys: Object.keys(responseData)
+  });
+  
+  return responseData;
 }
 
 // Create violation (multipart preferred)

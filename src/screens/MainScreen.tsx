@@ -255,6 +255,15 @@ export default function MainScreen() {
         style={styles.webview}
       />
 
+      {/* Кнопка геолокации - всегда видима */}
+      <TouchableOpacity 
+        onPress={moveToMyLocation} 
+        style={styles.locationButton}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.locationButtonIcon}>📍</Text>
+      </TouchableOpacity>
+
       {/* Кнопка добавления проблемы */}
       {mode === "idle" && (
         <TouchableOpacity onPress={startAddingProblem} style={styles.fab}>
@@ -267,19 +276,21 @@ export default function MainScreen() {
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <View style={styles.crosshair} />
           <View style={styles.bottomBar}>
-            <Text style={styles.coordsText}>
-              {mapCenter ? `${mapCenter[0].toFixed(5)}, ${mapCenter[1].toFixed(5)}` : "..."}
-            </Text>
             <View style={styles.buttonsRow}>
-              <View style={styles.buttonWrapper}>
-                <Button title="Моё место" onPress={moveToMyLocation} />
-              </View>
-              <View style={styles.buttonWrapper}>
-                <Button title="Отмена" onPress={cancelLocationPicking} />
-              </View>
-              <View style={styles.buttonWrapper}>
-                <Button title="Подтвердить" onPress={confirmLocation} />
-              </View>
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.cancelButton]} 
+                onPress={cancelLocationPicking}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cancelButtonText}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.primaryButton]} 
+                onPress={confirmLocation}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.primaryButtonText}>✓ Подтвердить</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -312,6 +323,30 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "700",
   },
+  locationButton: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  locationButtonIcon: {
+    fontSize: 24,
+  },
   crosshair: {
     position: 'absolute',
     left: '50%',
@@ -330,20 +365,77 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    padding: 20,
+    paddingBottom: 32,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  coordsText: {
-    fontWeight: "600",
+    justifyContent: 'center',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
   buttonsRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    width: '100%',
   },
-  buttonWrapper: {
-    marginRight: 12,
+  actionButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
+    marginHorizontal: 6,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  primaryButton: {
+    backgroundColor: '#007aff',
+    flex: 1,
+  },
+  cancelButton: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#d0d0d0',
+    flex: 1,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  secondaryButton: {
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1.5,
+    borderColor: '#e0e0e0',
+  },
+  secondaryButtonText: {
+    color: '#333333',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  cancelButtonText: {
+    color: '#666666',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

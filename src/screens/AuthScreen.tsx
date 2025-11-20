@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import sha256 from "js-sha256";
 import { encode as encodeBase64 } from "base64-arraybuffer";
-import { saveToken } from "../lib/auth";
+import { saveToken, saveRefreshToken } from "../lib/auth";
 import { getProviders, beginLogin, exchangeCode } from "../lib/api";
 import { API_BASE } from "../lib/config";
 import type { Provider } from "../types/api";
@@ -161,6 +161,11 @@ export default function AuthScreen() {
       const token = (resp as any).token || (resp as any).access_token;
       if (!token) throw new Error("No token in exchange response");
       await saveToken(token);
+      // Сохраняем refresh_token если он есть в ответе
+      const refreshToken = (resp as any).refresh_token;
+      if (refreshToken) {
+        await saveRefreshToken(refreshToken);
+      }
       verifierByState.delete(state);
       Alert.alert("Success", "Authenticated successfully");
     } catch (err: any) {
