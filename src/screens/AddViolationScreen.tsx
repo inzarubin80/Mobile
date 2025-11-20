@@ -194,7 +194,7 @@ export default function AddViolationScreen() {
       });
 
        
-      navigation.navigate('Main' as never)
+      navigation.goBack();
    
 
     } catch (e: any) {

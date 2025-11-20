@@ -14,7 +14,8 @@ async function parseJsonSafe<T>(res: Response): Promise<T> {
 
 export async function getProviders(base?: string): Promise<Provider[]> {
   const host = base || API_BASE;
-  const res = await fetch(`${host}/api/providers`, { method: "GET" });
+  // Используем apiFetch для добавления необходимых заголовков
+  const res = await apiFetch(`${host}/api/providers`, { method: "GET" });
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(errText || `failed to load providers (${res.status})`);
@@ -29,7 +30,8 @@ export async function beginLogin(baseOrProvider: string | undefined, providerOrC
   const host = isOldSignature ? (baseOrProvider as string) || API_BASE : API_BASE;
   const provider = isOldSignature ? providerOrChallenge : providerOrChallenge;
   const codeChallenge = isOldSignature ? (maybeChallenge as string) : (maybeChallenge as unknown as string) || "";
-  const res = await fetch(`${host}/api/user/login`, {
+  // Используем apiFetch для добавления необходимых заголовков
+  const res = await apiFetch(`${host}/api/user/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider, code_challenge: codeChallenge }),
@@ -173,7 +175,8 @@ export async function getViolationById(id: string, base?: string): Promise<Parti
   const host = base || API_BASE;
   const url = `${host}/api/violations/${id}`;
   console.log("[getViolationById] Fetching:", url);
-  const res = await fetch(url, { method: "GET" });
+  // Используем apiFetch для добавления необходимых заголовков (даже для публичных endpoint)
+  const res = await apiFetch(url, { method: "GET" });
   if (res.status === 404) {
     throw new Error("violation not found");
   }

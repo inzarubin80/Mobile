@@ -1,8 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceEventEmitter } from "react-native";
 import CookieManager from "@react-native-cookies/cookies";
+import CryptoJS from "crypto-js";
 import { refreshToken } from "./api";
-import { API_BASE } from "./config";
+import { API_BASE, MOBILE_APP_SECRET } from "./config";
 
 const TOKEN_KEY = "@auth/token";
 const REFRESH_TOKEN_KEY = "@auth/refresh_token";
@@ -50,6 +51,39 @@ export async function clearRefreshToken(): Promise<void> {
 
 // Promise для синхронизации конкурентных refresh запросов
 let refreshPromise: Promise<string | null> | null = null;
+
+// Helper function to generate HMAC signature for request
+// Теперь подписываем только timestamp для упрощения
+function generateRequestSignature(
+  method: string,
+  url: string,
+  body: string | null,
+  timestamp: number
+): string {
+  // Формируем строку для подписи: только timestamp
+  const signString = String(timestamp);
+  
+  // Логируем строку для подписи (для отладки)
+  console.log("[generateRequestSignature] Sign string (timestamp only):", signString);
+  console.log("[generateRequestSignature] Signature data:", {
+    timestamp: timestamp,
+    timestampType: typeof timestamp,
+    signString: signString
+  });
+  
+  // Генерируем HMAC-SHA256 подпись
+  const signature = CryptoJS.HmacSHA256(signString, MOBILE_APP_SECRET);
+  const base64Signature = CryptoJS.enc.Base64.stringify(signature);
+  
+  console.log("[generateRequestSignature] Generated signature:", {
+    signature: base64Signature,
+    signatureLength: base64Signature.length,
+    secretLength: MOBILE_APP_SECRET.length,
+    secretFirstChars: MOBILE_APP_SECRET.substring(0, 5) + '...'
+  });
+  
+  return base64Signature;
+}
 
 // Helper function to parse URL without using URL constructor (React Native compatibility)
 function parseUrl(url: string): { protocol: string; host: string; hostname: string; pathname: string } | null {
@@ -318,14 +352,66 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   const headers = new Headers(init.headers || {});
   if (token) headers.set("Authorization", `Bearer ${token}`);
   headers.set("Accept", "application/json");
+  headers.set("X-Client-Type", "mobile");
+  
+  // Генерируем HMAC подпись вместо передачи секрета
+  const method = init.method || 'GET';
+  const timestamp = Date.now();
+  
+  // Body больше не используется в подписи, но оставляем параметр для совместимости
+  const signature = generateRequestSignature(method, url, null, timestamp);
+  headers.set("X-Mobile-Signature", signature);
+  headers.set("X-Mobile-Timestamp", String(timestamp));
+  
+  // Логируем данные для подписи (для отладки)
+  const urlPartsForLog = parseUrl(url);
+  const pathForLog = urlPartsForLog ? (urlPartsForLog.pathname || '/') + (url.includes('?') ? url.substring(url.indexOf('?')) : '') : url;
+  console.log("[apiFetch] Request signature data:", {
+    method,
+    url,
+    path: pathForLog,
+    timestamp,
+    signature: signature.substring(0, 20) + '...'
+  });
   
   // Добавляем куки в заголовки
   await addCookiesToHeaders(url, headers);
   
+  // Логируем все заголовки перед отправкой (для отладки)
+  const headersObj: Record<string, string> = {};
+  headers.forEach((value: string, key: string) => {
+    headersObj[key] = value;
+  });
+  console.log("[apiFetch] Sending request with headers:", {
+    url,
+    method: init.method || 'GET',
+    headers: headersObj,
+    hasBody: !!init.body,
+    bodyType: init.body ? (init.body instanceof FormData ? 'FormData' : typeof init.body) : 'none'
+  });
+  
   // Сохраняем body для возможного повторного использования
   const originalBody = init.body;
   
-  let res = await fetch(input, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(input, { ...init, headers });
+  } catch (error) {
+    console.error("[apiFetch] Network error:", {
+      url,
+      error: error instanceof Error ? error.message : String(error),
+      errorType: error instanceof Error ? error.constructor.name : typeof error
+    });
+    throw error;
+  }
+  
+  // Логируем ответ
+  console.log("[apiFetch] Response received:", {
+    url,
+    status: res.status,
+    statusText: res.statusText,
+    headers: Object.fromEntries(res.headers.entries())
+  });
   
   // Сохраняем куки из ответа
   await saveCookiesFromResponse(url, res);
@@ -352,6 +438,15 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
       const newHeaders = new Headers(init.headers || {});
       if (newToken) newHeaders.set("Authorization", `Bearer ${newToken}`);
       newHeaders.set("Accept", "application/json");
+      newHeaders.set("X-Client-Type", "mobile");
+      
+      // Генерируем новую подпись для повторного запроса (body не используется)
+      const retryMethod = init.method || 'GET';
+      const retryTimestamp = Date.now();
+      const retrySignature = generateRequestSignature(retryMethod, url, null, retryTimestamp);
+      newHeaders.set("X-Mobile-Signature", retrySignature);
+      newHeaders.set("X-Mobile-Timestamp", String(retryTimestamp));
+      
       await addCookiesToHeaders(url, newHeaders);
       // Используем сохраненный body для повторного запроса
       res = await fetch(input, { ...init, body: originalBody, headers: newHeaders });
@@ -406,12 +501,21 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
       
       try {
         await refreshPromise;
-        // После успешного refresh повторяем запрос с новым токеном
-        const newToken = await loadToken();
-        const newHeaders = new Headers(init.headers || {});
-        if (newToken) newHeaders.set("Authorization", `Bearer ${newToken}`);
-        newHeaders.set("Accept", "application/json");
-        await addCookiesToHeaders(url, newHeaders);
+          // После успешного refresh повторяем запрос с новым токеном
+          const newToken = await loadToken();
+          const newHeaders = new Headers(init.headers || {});
+          if (newToken) newHeaders.set("Authorization", `Bearer ${newToken}`);
+          newHeaders.set("Accept", "application/json");
+          newHeaders.set("X-Client-Type", "mobile");
+          
+          // Генерируем новую подпись для повторного запроса (body не используется)
+          const retryMethod2 = init.method || 'GET';
+          const retryTimestamp2 = Date.now();
+          const retrySignature2 = generateRequestSignature(retryMethod2, url, null, retryTimestamp2);
+          newHeaders.set("X-Mobile-Signature", retrySignature2);
+          newHeaders.set("X-Mobile-Timestamp", String(retryTimestamp2));
+          
+          await addCookiesToHeaders(url, newHeaders);
         // Используем сохраненный body для повторного запроса
         res = await fetch(input, { ...init, body: originalBody, headers: newHeaders });
         // Сохраняем куки из ответа после повторного запроса

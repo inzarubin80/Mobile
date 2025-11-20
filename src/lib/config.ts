@@ -1,3 +1,4 @@
 export const API_BASE = "http://172.29.47.123:8090";
+export const MOBILE_APP_SECRET = "12544667677898898992222";
 
 
