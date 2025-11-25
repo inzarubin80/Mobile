@@ -62,7 +62,8 @@ export interface Violation {
   status?: string;
   created_at?: string;
   user_id?: number; // From detail endpoint
-  photos?: ViolationPhoto[];
+  photos?: ViolationPhoto[]; // All photos from all requests (for backward compatibility)
+  requests?: ViolationRequest[]; // Array of all requests with detailed info
 }
 
 export interface Paged<T> {
@@ -70,6 +71,27 @@ export interface Paged<T> {
   page: number;
   page_size: number;
   total: number;
+}
+
+// Violation Request (заявка на закрытие нарушения)
+export interface ViolationRequestPhoto {
+  id: string;
+  request_id?: string; // May be missing in some API responses
+  violation_id?: string; // May be present instead of request_id
+  url: string;
+  thumb_url?: string;
+  created_at?: string;
+}
+
+export interface ViolationRequest {
+  id: string;
+  violation_id: string;
+  status: "open" | "partially_closed" | "closed";
+  created_by_user_id: number;
+  comment?: string;
+  photos?: ViolationRequestPhoto[];
+  created_at: string;
+  updated_at: string;
 }
 
 

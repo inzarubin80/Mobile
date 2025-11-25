@@ -1,4 +1,4 @@
-import { ExchangeRequest, ExchangeResponse, LoginResponse, Provider, ProvidersResponse, CreateViolationResponse, ViolationType, Violation, Paged } from "../types/api";
+import { ExchangeRequest, ExchangeResponse, LoginResponse, Provider, ProvidersResponse, CreateViolationResponse, ViolationType, Violation, Paged, ViolationRequest } from "../types/api";
 import { API_BASE } from "./config";
 import { apiFetch } from "./auth";
 
@@ -135,24 +135,46 @@ export async function createViolation(params: CreateViolationParams, base?: stri
   form.append("lng", String(params.lng));
   if (typeof params.accuracy === "number") form.append("accuracy", String(params.accuracy));
   if (params.photos && params.photos.length) {
+    console.log("[createViolation] Adding photos:", params.photos.length);
     for (const p of params.photos) {
       const name = p.name || `photo_${Math.floor(Math.random() * 1e9)}.jpg`;
       const mime = p.type || "image/jpeg";
       // React Native file form: { uri, name, type }
       // @ts-ignore - RN FormData File value
-      form.append("photos", { uri: p.uri, name, type: mime });
+      form.append("photos[]", { uri: p.uri, name, type: mime });
+      console.log("[createViolation] Added photo:", { uri: p.uri.substring(0, 50) + "...", name, type: mime });
     }
   }
+  console.log("[createViolation] Sending request to:", `${host}/api/violations`);
   // Use apiFetch to include Authorization automatically; don't set Content-Type to let RN add boundary
-  const res = await apiFetch(`${host}/api/violations`, {
-    method: "POST",
-    body: form as any,
-  } as any);
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(errText || `create violation failed (${res.status})`);
+  // Add timeout for FormData requests (60 seconds for file uploads)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.error("[createViolation] Request timeout after 60 seconds");
+    controller.abort();
+  }, 60000);
+  
+  try {
+    const res = await apiFetch(`${host}/api/violations`, {
+      method: "POST",
+      body: form as any,
+      signal: controller.signal,
+    } as any);
+    clearTimeout(timeoutId);
+    
+    console.log("[createViolation] Response status:", res.status);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(errText || `create violation failed (${res.status})`);
+    }
+    return parseJsonSafe<CreateViolationResponse>(res);
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error("Request timeout: загрузка заняла слишком много времени");
+    }
+    throw error;
   }
-  return parseJsonSafe<CreateViolationResponse>(res);
 }
 
 // Fetch violations by bbox only
@@ -199,6 +221,67 @@ export async function getViolationById(id: string, base?: string): Promise<Parti
   }
   // Ensure id is set from path parameter
   return { ...data, id };
+}
+
+// Close violation request (create a request to close/partially close a violation)
+export interface CloseViolationRequestParams {
+  status: "partially_closed" | "closed";
+  comment?: string;
+  photos?: Array<{ uri: string; name?: string; type?: string }>;
+}
+
+export async function closeViolationRequest(
+  violationId: string,
+  params: CloseViolationRequestParams,
+  base?: string
+): Promise<ViolationRequest> {
+  const host = base || API_BASE;
+  const form = new FormData();
+  form.append("status", params.status);
+  if (params.comment) {
+    form.append("comment", params.comment);
+  }
+  if (params.photos && params.photos.length) {
+    console.log("[closeViolationRequest] Adding photos:", params.photos.length);
+    for (const p of params.photos) {
+      const name = p.name || `photo_${Math.floor(Math.random() * 1e9)}.jpg`;
+      const mime = p.type || "image/jpeg";
+      // React Native file form: { uri, name, type }
+      // @ts-ignore - RN FormData File value
+      form.append("photos[]", { uri: p.uri, name, type: mime });
+      console.log("[closeViolationRequest] Added photo:", { uri: p.uri.substring(0, 50) + "...", name, type: mime });
+    }
+  }
+  console.log("[closeViolationRequest] Sending request to:", `${host}/api/violations/${violationId}/close-request`);
+  // Use apiFetch to include Authorization automatically; don't set Content-Type to let RN add boundary
+  // Add timeout for FormData requests (60 seconds for file uploads)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.error("[closeViolationRequest] Request timeout after 60 seconds");
+    controller.abort();
+  }, 60000);
+  
+  try {
+    const res = await apiFetch(`${host}/api/violations/${violationId}/close-request`, {
+      method: "POST",
+      body: form as any,
+      signal: controller.signal,
+    } as any);
+    clearTimeout(timeoutId);
+    
+    console.log("[closeViolationRequest] Response status:", res.status);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(errText || `close violation request failed (${res.status})`);
+    }
+    return parseJsonSafe<ViolationRequest>(res);
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error("Request timeout: загрузка заняла слишком много времени");
+    }
+    throw error;
+  }
 }
 
 

@@ -12,10 +12,15 @@ import {
   TextInput,
   Share,
   ActivityIndicator,
+  Platform,
+  Dimensions,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
-import type { Violation } from "../types/api";
-import { getViolationById } from "../lib/api";
+import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
+import { PermissionsAndroid } from "react-native";
+import { Button, Card, Input, Badge, Avatar, Icon } from "@rneui/base";
+import type { Violation, ViolationRequest } from "../types/api";
+import { getViolationById, closeViolationRequest } from "../lib/api";
 
 type RootStackParamList = {
   ViolationDetails: { violation: Violation; id?: string };
@@ -30,11 +35,24 @@ export default function ViolationDetailsScreen() {
   const [violation, setViolation] = useState<Violation>(initialViolation);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"gallery" | "chat">("gallery");
+  const [activeTab, setActiveTab] = useState<"gallery" | "chat" | "history">("gallery");
   const [showResolutionForm, setShowResolutionForm] = useState(false);
   const [resolutionType, setResolutionType] = useState<"resolved" | "partially" | null>(null);
   const [resolutionComment, setResolutionComment] = useState("");
+  const [resolutionPhotos, setResolutionPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+  const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
+  const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; index: number; photos: any[] } | null>(null);
+  const [screenDimensions, setScreenDimensions] = useState(Dimensions.get("window"));
   const isMountedRef = useRef(true);
+
+  // Обновление размеров экрана при изменении ориентации
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener("change", ({ window }) => {
+      setScreenDimensions(window);
+    });
+    return () => subscription?.remove();
+  }, []);
 
   // Log lifecycle events and set mounted flag
   useEffect(() => {
@@ -72,11 +90,13 @@ export default function ViolationDetailsScreen() {
           }
           console.log("[ViolationDetails] Loaded data:", JSON.stringify(data, null, 2));
           console.log("[ViolationDetails] Loaded photos:", data.photos);
+          console.log("[ViolationDetails] Loaded requests:", data.requests);
           // Merge loaded data with initial data (initial takes precedence for fields like type, status)
           setViolation((prev) => {
             const merged = { ...prev, ...data, id: violationId };
             console.log("[ViolationDetails] Merged violation:", JSON.stringify(merged, null, 2));
             console.log("[ViolationDetails] Merged photos:", merged.photos);
+            console.log("[ViolationDetails] Merged requests:", merged.requests);
             return merged;
           });
           setLoading(false);
@@ -96,7 +116,12 @@ export default function ViolationDetailsScreen() {
   }, [id, initialViolation.id]);
 
   // Показываем кнопки статусов только если проблема еще не решена
-  const canMarkAsResolved = violation.status === "new" || violation.status === "in_progress" || !violation.status;
+  // Новые статусы: new, confirmed, resolved, partially_resolved
+  const canMarkAsResolved = 
+    violation.status === "new" || 
+    violation.status === "confirmed" || 
+    violation.status === "in_progress" || 
+    !violation.status;
 
   const handleComplain = useCallback(() => {
     Alert.alert("Пожаловаться", "Функция будет доступна в ближайшее время");
@@ -116,18 +141,131 @@ export default function ViolationDetailsScreen() {
     setShowResolutionForm(true);
   }, []);
 
-  const handleSubmitResolution = useCallback(() => {
+  const requestCameraPermission = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== "android") return true;
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.CAMERA,
+      {
+        title: "Доступ к камере",
+        message: "Нужен доступ к камере для съемки фото",
+        buttonPositive: "OK",
+      }
+    );
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  }, []);
+
+  const addResolutionPhotoFromGallery = useCallback(async () => {
+    try {
+      const res = await launchImageLibrary({
+        mediaType: "photo",
+        quality: 0.8,
+        selectionLimit: 10,
+      });
+
+      if (res?.assets?.length) {
+        const newPhotos = res.assets
+          .filter((a: Asset) => !!a.uri)
+          .map((a: Asset) => ({
+            uri: a.uri!,
+            name: a.fileName || undefined,
+            type: a.type || undefined,
+          }));
+
+        setResolutionPhotos(prev => {
+          const existingUris = new Set(prev.map(p => p.uri));
+          const uniqueNewPhotos = newPhotos.filter(p => !existingUris.has(p.uri));
+          return [...prev, ...uniqueNewPhotos];
+        });
+      }
+    } catch (e: any) {
+      if (e.message !== "User cancelled image selection") {
+        Alert.alert("Ошибка", e.message || "Не удалось выбрать фото");
+      }
+    }
+  }, []);
+
+  const addResolutionPhotoFromCamera = useCallback(async () => {
+    try {
+      const hasPermission = await requestCameraPermission();
+      if (!hasPermission) {
+        Alert.alert("Нет доступа", "Разрешите доступ к камере в настройках");
+        return;
+      }
+
+      const res = await launchCamera({
+        mediaType: "photo",
+        cameraType: "back",
+        quality: 0.8,
+        saveToPhotos: true,
+      });
+
+      if (res?.assets?.length) {
+        const newPhotos = res.assets
+          .filter((a: Asset) => !!a.uri)
+          .map((a: Asset) => ({
+            uri: a.uri!,
+            name: a.fileName || undefined,
+            type: a.type || undefined,
+          }));
+
+        setResolutionPhotos(prev => {
+          const existingUris = new Set(prev.map(p => p.uri));
+          const uniqueNewPhotos = newPhotos.filter(p => !existingUris.has(p.uri));
+          return [...prev, ...uniqueNewPhotos];
+        });
+      }
+    } catch (e: any) {
+      if (e.message !== "User cancelled image selection") {
+        Alert.alert("Ошибка камеры", e.message || "Не удалось сделать фото");
+      }
+    }
+  }, [requestCameraPermission]);
+
+  const removeResolutionPhoto = useCallback((uri: string) => {
+    setResolutionPhotos(prev => prev.filter(p => p.uri !== uri));
+  }, []);
+
+  const handleSubmitResolution = useCallback(async () => {
     if (!resolutionComment.trim()) {
       Alert.alert("Ошибка", "Пожалуйста, добавьте комментарий");
       return;
     }
-    // TODO: Отправить на сервер
-    console.log("Submit resolution:", { type: resolutionType, comment: resolutionComment, violationId: violation.id });
-    Alert.alert("Успешно", "Заявка на решение отправлена");
-    setShowResolutionForm(false);
-    setResolutionComment("");
-    setResolutionType(null);
-  }, [resolutionType, resolutionComment, violation.id]);
+
+    if (!violation.id) {
+      Alert.alert("Ошибка", "Не указан ID нарушения");
+      return;
+    }
+
+    setSubmittingResolution(true);
+
+    try {
+      const status = resolutionType === "resolved" ? "closed" : "partially_closed";
+      
+      await closeViolationRequest(violation.id, {
+        status,
+        comment: resolutionComment.trim(),
+        photos: resolutionPhotos.length > 0 ? resolutionPhotos : undefined,
+      });
+
+      // Обновляем данные нарушения
+      const updatedViolation = await getViolationById(violation.id);
+      if (isMountedRef.current) {
+        setViolation(prev => ({ ...prev, ...updatedViolation, id: violation.id }));
+      }
+
+      Alert.alert("Успешно", "Заявка на решение отправлена");
+      setShowResolutionForm(false);
+      setResolutionComment("");
+      setResolutionPhotos([]);
+      setResolutionType(null);
+    } catch (e: any) {
+      Alert.alert("Ошибка", e?.message || "Не удалось отправить заявку");
+    } finally {
+      if (isMountedRef.current) {
+        setSubmittingResolution(false);
+      }
+    }
+  }, [resolutionType, resolutionComment, resolutionPhotos, violation.id]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -172,6 +310,128 @@ export default function ViolationDetailsScreen() {
     };
     return labels[type] || type;
   }, []);
+
+  const getRequestStatusLabel = useCallback((status: string) => {
+    const labels: Record<string, string> = {
+      open: "Создание",
+      partially_closed: "Частично решено",
+      closed: "Полностью решено",
+    };
+    return labels[status] || status;
+  }, []);
+
+  const getRequestStatusColor = useCallback((status: string) => {
+    const colors: Record<string, string> = {
+      open: "#34C759", // green
+      partially_closed: "#FF9500", // orange
+      closed: "#007AFF", // blue
+    };
+    return colors[status] || "#999";
+  }, []);
+
+  const getRequestStatusIcon = useCallback((status: string) => {
+    const icons: Record<string, string> = {
+      open: "note-add",
+      partially_closed: "hourglass-empty",
+      closed: "check-circle",
+    };
+    return icons[status] || "help-circle";
+  }, []);
+
+  const toggleRequestExpanded = useCallback((requestId: string) => {
+    setExpandedRequests((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(requestId)) {
+        newSet.delete(requestId);
+      } else {
+        newSet.add(requestId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const openFullscreenPhoto = useCallback((photo: any, photos: any[], index: number) => {
+    setFullscreenPhoto({ uri: photo.thumb_url || photo.url, index, photos });
+  }, []);
+
+  const closeFullscreenPhoto = useCallback(() => {
+    setFullscreenPhoto(null);
+  }, []);
+
+  const copyRequestInfo = useCallback(async (request: ViolationRequest) => {
+    const info = [
+      `Статус: ${getRequestStatusLabel(request.status)}`,
+      `Дата: ${formatDate(request.created_at)}`,
+      request.comment ? `Комментарий: ${request.comment}` : "",
+      request.photos && request.photos.length > 0 ? `Фото: ${request.photos.length}` : "",
+    ].filter(Boolean).join("\n");
+    
+    try {
+      // Используем Clipboard из React Native (если доступен) или Share
+      if (Platform.OS === "ios" || Platform.OS === "android") {
+        // Пробуем использовать встроенный Clipboard
+        const Clipboard = require("react-native").Clipboard;
+        if (Clipboard && Clipboard.setString) {
+          Clipboard.setString(info);
+          Alert.alert("Скопировано", "Информация о заявке скопирована");
+        } else {
+          // Fallback на Share
+          await Share.share({ message: info, title: "Информация о заявке" });
+        }
+      } else {
+        await Share.share({ message: info, title: "Информация о заявке" });
+      }
+    } catch (error: any) {
+      // Если Clipboard не доступен, используем Share
+      try {
+        await Share.share({ message: info, title: "Информация о заявке" });
+      } catch (shareError: any) {
+        if (shareError.message !== "User did not share") {
+          Alert.alert("Ошибка", "Не удалось скопировать информацию");
+        }
+      }
+    }
+  }, [getRequestStatusLabel, formatDate]);
+
+  const shareRequest = useCallback(async (request: ViolationRequest) => {
+    try {
+      const info = [
+        `Статус: ${getRequestStatusLabel(request.status)}`,
+        `Дата: ${formatDate(request.created_at)}`,
+        request.comment || "",
+      ].filter(Boolean).join("\n");
+      
+      await Share.share({
+        message: info,
+        title: "Информация о заявке",
+      });
+    } catch (error: any) {
+      if (error.message !== "User did not share") {
+        Alert.alert("Ошибка", "Не удалось поделиться");
+      }
+    }
+  }, [getRequestStatusLabel, formatDate]);
+
+  const formatTimeAgo = useCallback((dateStr?: string) => {
+    if (!dateStr) return "Дата неизвестна";
+    try {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return "только что";
+      if (diffMins < 60) return `${diffMins} ${diffMins === 1 ? "минуту" : diffMins < 5 ? "минуты" : "минут"} назад`;
+      if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? "час" : diffHours < 5 ? "часа" : "часов"} назад`;
+      if (diffDays < 7) return `${diffDays} ${diffDays === 1 ? "день" : diffDays < 5 ? "дня" : "дней"} назад`;
+      
+      return formatDate(dateStr);
+    } catch {
+      return formatDate(dateStr);
+    }
+  }, [formatDate]);
 
   const photos = violation.photos || [];
   
@@ -240,6 +500,14 @@ export default function ViolationDetailsScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[styles.tab, activeTab === "history" && styles.tabActive]}
+            onPress={() => setActiveTab("history")}
+          >
+            <Text style={[styles.tabText, activeTab === "history" && styles.tabTextActive]}>
+              История {violation.requests && violation.requests.length > 0 ? `(${violation.requests.length})` : ""}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.tab, activeTab === "chat" && styles.tabActive]}
             onPress={() => setActiveTab("chat")}
           >
@@ -294,6 +562,165 @@ export default function ViolationDetailsScreen() {
             removeClippedSubviews={false}
           />
         </View>
+        {/* History Container */}
+        <View
+          style={[
+            styles.historyContainer,
+            {
+              opacity: activeTab === "history" ? 1 : 0,
+              pointerEvents: activeTab === "history" ? "auto" : "none",
+            },
+          ]}
+        >
+          {violation.requests && violation.requests.length > 0 ? (
+            <View style={styles.historyList}>
+              {[...violation.requests]
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                .map((item) => {
+                  const isExpanded = expandedRequests.has(item.id);
+                  const hasContent = (item.comment && item.comment.trim()) || (item.photos && item.photos.length > 0);
+                  return (
+                    <Card key={item.id} containerStyle={[styles.requestCardRNE, { borderLeftColor: getRequestStatusColor(item.status) }]}>
+                      {/* Header - всегда видимый */}
+                      <TouchableOpacity
+                        style={styles.requestCardHeader}
+                        onPress={() => hasContent && toggleRequestExpanded(item.id)}
+                        activeOpacity={hasContent ? 0.7 : 1}
+                      >
+                        <View style={styles.requestHeaderLeft}>
+                          <View style={styles.requestHeaderTop}>
+                            <Icon
+                              name={getRequestStatusIcon(item.status)}
+                              type="material"
+                              size={22}
+                              color={getRequestStatusColor(item.status)}
+                              containerStyle={styles.requestStatusIcon}
+                            />
+                            <Badge
+                              value={getRequestStatusLabel(item.status)}
+                              status="success"
+                              badgeStyle={{ 
+                                backgroundColor: getRequestStatusColor(item.status), 
+                                paddingHorizontal: 12, 
+                                paddingVertical: 5,
+                                borderRadius: 12,
+                              }}
+                              textStyle={{ fontSize: 12, fontWeight: "700", letterSpacing: 0.3 }}
+                            />
+                          </View>
+                          <View style={styles.requestMetaInfo}>
+                            <View style={styles.requestAuthorContainer}>
+                              <Avatar
+                                size={22}
+                                rounded
+                                title={item.created_by_user_id === violation.user_id ? "В" : String(item.created_by_user_id)[0]}
+                                containerStyle={{ backgroundColor: "#007AFF", marginRight: 8 }}
+                              />
+                              <View style={styles.requestAuthorInfo}>
+                                <Text style={styles.requestAuthor}>
+                                  {item.created_by_user_id === violation.user_id ? "Вы" : `ID ${item.created_by_user_id}`}
+                                </Text>
+                                <Text style={styles.requestTimeAgo}>{formatTimeAgo(item.created_at)}</Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                        <View style={styles.requestHeaderRight}>
+                          {item.photos && item.photos.length > 0 && (
+                            <View style={styles.requestPhotoCountBadge}>
+                              <Icon name="photo-library" type="material" size={14} color="#1976D2" />
+                              <Text style={styles.requestPhotoCountText}>{item.photos.length}</Text>
+                            </View>
+                          )}
+                          {hasContent && (
+                            <Icon
+                              name={isExpanded ? "expand-less" : "expand-more"}
+                              type="material"
+                              size={24}
+                              color="#666"
+                            />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Expandable content */}
+                      {isExpanded && hasContent && (
+                        <View style={styles.requestCardExpandable}>
+                          {/* Full date in expanded view */}
+                          <View style={styles.requestDateExpanded}>
+                            <Icon name="schedule" type="material" size={14} color="#999" />
+                            <Text style={styles.requestDateExpandedText}>{formatDate(item.created_at)}</Text>
+                          </View>
+                          {/* Comment */}
+                          {item.comment && item.comment.trim() && (
+                            <View style={styles.requestCommentContainer}>
+                              <View style={styles.requestCommentHeader}>
+                                <Icon name="comment" type="material" size={16} color="#666" />
+                                <Text style={styles.requestCommentLabel}>Комментарий</Text>
+                              </View>
+                              <Text style={styles.requestComment}>{item.comment}</Text>
+                            </View>
+                          )}
+                          {/* Photos */}
+                          {item.photos && item.photos.length > 0 && (
+                            <View style={styles.requestPhotosContainer}>
+                              <View style={styles.requestPhotosHeader}>
+                                <Icon name="photo-library" type="material" size={16} color="#666" />
+                                <Text style={styles.requestPhotosLabel}>Фотографии ({item.photos.length})</Text>
+                              </View>
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.requestPhotosList}
+                              >
+                                {item.photos.map((photo, photoIndex) => (
+                                  <TouchableOpacity
+                                    key={photo.id}
+                                    style={styles.requestPhotoItem}
+                                    onPress={() => openFullscreenPhoto(photo, item.photos || [], photoIndex)}
+                                  >
+                                    <Image
+                                      source={{ uri: photo.thumb_url || photo.url }}
+                                      style={styles.requestPhoto}
+                                      resizeMode="cover"
+                                    />
+                                    <View style={styles.requestPhotoOverlay}>
+                                      <Icon name="zoom-in" type="material" size={20} color="#FFFFFF" />
+                                    </View>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            </View>
+                          )}
+                          {/* Actions */}
+                          <View style={styles.requestActions}>
+                            <TouchableOpacity
+                              style={styles.requestActionButton}
+                              onPress={() => shareRequest(item)}
+                            >
+                              <Icon name="share" type="material" size={18} color="#007AFF" />
+                              <Text style={styles.requestActionText}>Поделиться</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.requestActionButton}
+                              onPress={() => copyRequestInfo(item)}
+                            >
+                              <Icon name="content-copy" type="material" size={18} color="#007AFF" />
+                              <Text style={styles.requestActionText}>Копировать</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+                    </Card>
+                  );
+                })}
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>История заявок пуста</Text>
+            </View>
+          )}
+        </View>
         <View
           style={[
             styles.chatContainer,
@@ -319,25 +746,43 @@ export default function ViolationDetailsScreen() {
             },
           ]}
         >
-          <TouchableOpacity style={styles.resolvedButton} onPress={handleResolved}>
-            <Text style={styles.resolvedButtonText}>✓ Решено</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.partiallyButton} onPress={handlePartiallyResolved}>
-            <Text style={styles.partiallyButtonText}>~ Частично решено</Text>
-          </TouchableOpacity>
+          <Button
+            title="✓ Решено"
+            onPress={handleResolved}
+            buttonStyle={{ backgroundColor: "#34C759" }}
+            containerStyle={{ marginBottom: 12 }}
+          />
+          <Button
+            title="~ Частично решено"
+            onPress={handlePartiallyResolved}
+            buttonStyle={{ backgroundColor: "#FF9500" }}
+          />
         </View>
 
         {/* Secondary Actions */}
         <View style={styles.secondaryActions}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleSubscribe}>
-            <Text style={styles.secondaryButtonText}>Подписаться</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleShare}>
-            <Text style={styles.secondaryButtonText}>Поделиться</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.secondaryButton, styles.complainButtonSecondary]} onPress={handleComplain}>
-            <Text style={[styles.secondaryButtonText, styles.complainButtonTextSecondary]}>Пожаловаться</Text>
-          </TouchableOpacity>
+          <Button
+            title="Подписаться"
+            onPress={handleSubscribe}
+            type="outline"
+            buttonStyle={styles.secondaryButtonRNE}
+            containerStyle={styles.secondaryButtonContainer}
+          />
+          <Button
+            title="Поделиться"
+            onPress={handleShare}
+            type="outline"
+            buttonStyle={styles.secondaryButtonRNE}
+            containerStyle={styles.secondaryButtonContainer}
+          />
+          <Button
+            title="Пожаловаться"
+            onPress={handleComplain}
+            type="outline"
+            buttonStyle={[styles.secondaryButtonRNE, styles.complainButtonRNEStyle]}
+            titleStyle={styles.complainButtonTextRNEStyle}
+            containerStyle={styles.secondaryButtonContainer}
+          />
         </View>
       </ScrollView>
 
@@ -347,45 +792,146 @@ export default function ViolationDetailsScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => {
-          setShowResolutionForm(false);
-          setResolutionComment("");
-          setResolutionType(null);
+          if (!submittingResolution) {
+            setShowResolutionForm(false);
+            setResolutionComment("");
+            setResolutionPhotos([]);
+            setResolutionType(null);
+          }
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {resolutionType === "resolved" ? "Проблема решена" : "Проблема частично решена"}
-            </Text>
-            <Text style={styles.modalSubtitle}>Добавьте комментарий о решении</Text>
-            <TextInput
-              style={styles.modalInput}
-              multiline
-              numberOfLines={4}
-              placeholder="Опишите, что было сделано..."
-              value={resolutionComment}
-              onChangeText={setResolutionComment}
-              textAlignVertical="top"
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => {
-                  setShowResolutionForm(false);
-                  setResolutionComment("");
-                  setResolutionType(null);
-                }}
-              >
-                <Text style={styles.modalButtonCancelText}>Отмена</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSubmit]}
-                onPress={handleSubmitResolution}
-              >
-                <Text style={styles.modalButtonSubmitText}>Отправить</Text>
-              </TouchableOpacity>
+          <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                {resolutionType === "resolved" ? "Проблема решена" : "Проблема частично решена"}
+              </Text>
+              <Text style={styles.modalSubtitle}>Добавьте комментарий о решении</Text>
+              <Input
+                multiline
+                numberOfLines={4}
+                placeholder="Опишите, что было сделано..."
+                value={resolutionComment}
+                onChangeText={setResolutionComment}
+                inputStyle={{ textAlignVertical: "top", minHeight: 120 }}
+                containerStyle={{ paddingHorizontal: 0, marginBottom: 20 }}
+                editable={!submittingResolution}
+              />
+
+              {/* Photo selection section */}
+              <View style={styles.modalPhotoSection}>
+                <Text style={styles.modalPhotoSectionTitle}>Фотографии (опционально)</Text>
+                <View style={styles.modalPhotoButtons}>
+                  <TouchableOpacity
+                    style={styles.modalPhotoButton}
+                    onPress={addResolutionPhotoFromGallery}
+                    disabled={submittingResolution}
+                  >
+                    <Text style={styles.modalPhotoButtonText}>📷 Галерея</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalPhotoButton}
+                    onPress={addResolutionPhotoFromCamera}
+                    disabled={submittingResolution}
+                  >
+                    <Text style={styles.modalPhotoButtonText}>📸 Камера</Text>
+                  </TouchableOpacity>
+                </View>
+                {resolutionPhotos.length > 0 && (
+                  <FlatList
+                    data={resolutionPhotos}
+                    horizontal
+                    keyExtractor={(item, index) => item.uri + index}
+                    renderItem={({ item }) => (
+                      <View style={styles.modalPhotoItem}>
+                        <Image source={{ uri: item.uri }} style={styles.modalPhotoPreview} />
+                        <TouchableOpacity
+                          style={styles.modalPhotoRemove}
+                          onPress={() => removeResolutionPhoto(item.uri)}
+                          disabled={submittingResolution}
+                        >
+                          <Text style={styles.modalPhotoRemoveText}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    contentContainerStyle={styles.modalPhotoList}
+                  />
+                )}
+              </View>
+
+              <View style={styles.modalActions}>
+                <Button
+                  title="Отмена"
+                  onPress={() => {
+                    if (!submittingResolution) {
+                      setShowResolutionForm(false);
+                      setResolutionComment("");
+                      setResolutionPhotos([]);
+                      setResolutionType(null);
+                    }
+                  }}
+                  disabled={submittingResolution}
+                  type="outline"
+                  buttonStyle={styles.modalButtonCancelRNE}
+                  titleStyle={styles.modalButtonCancelTextRNE}
+                  containerStyle={{ flex: 1, marginRight: 6 }}
+                />
+                <Button
+                  title={submittingResolution ? "" : "Отправить"}
+                  onPress={handleSubmitResolution}
+                  disabled={submittingResolution}
+                  loading={submittingResolution}
+                  buttonStyle={styles.modalButtonSubmitRNE}
+                  containerStyle={{ flex: 1, marginLeft: 6 }}
+                />
+              </View>
             </View>
-          </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Fullscreen Photo Modal */}
+      <Modal
+        visible={fullscreenPhoto !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFullscreenPhoto}
+      >
+        <View style={styles.fullscreenPhotoContainer}>
+          <TouchableOpacity
+            style={styles.fullscreenPhotoClose}
+            onPress={closeFullscreenPhoto}
+            activeOpacity={0.8}
+          >
+            <Icon name="close" type="material" size={32} color="#FFFFFF" />
+          </TouchableOpacity>
+          {fullscreenPhoto && (
+            <>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                contentOffset={{ x: fullscreenPhoto.index * screenDimensions.width, y: 0 }}
+                style={styles.fullscreenPhotoScroll}
+                contentContainerStyle={styles.fullscreenPhotoScrollContent}
+              >
+                {fullscreenPhoto.photos.map((photo, index) => (
+                  <View key={photo.id || index} style={[styles.fullscreenPhotoItem, { width: screenDimensions.width, height: screenDimensions.height }]}>
+                    <Image
+                      source={{ uri: photo.url || photo.thumb_url }}
+                      style={[styles.fullscreenPhotoImage, { width: screenDimensions.width, height: screenDimensions.height }]}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+              <View style={styles.fullscreenPhotoInfo}>
+                <Text style={styles.fullscreenPhotoCounter}>
+                  {fullscreenPhoto.index + 1} / {fullscreenPhoto.photos.length}
+                </Text>
+              </View>
+            </>
+          )}
         </View>
       </Modal>
     </View>
@@ -518,38 +1064,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 12,
   },
-  resolvedButton: {
-    backgroundColor: "#34C759",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    shadowColor: "#34C759",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  resolvedButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  partiallyButton: {
-    backgroundColor: "#FF9500",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    shadowColor: "#FF9500",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  partiallyButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
   secondaryActions: {
     flexDirection: "row",
     padding: 20,
@@ -557,22 +1071,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     marginTop: 8,
     flexWrap: "wrap",
-  },
-  secondaryButton: {
-    flex: 1,
-    minWidth: "30%",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: "#F2F2F7",
-    borderWidth: 1,
-    borderColor: "#E5E5EA",
-  },
-  secondaryButtonText: {
-    color: "#007AFF",
-    fontSize: 14,
-    fontWeight: "600",
   },
   complainButtonSecondary: {
     backgroundColor: "#FFF5F5",
@@ -586,13 +1084,19 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
+  modalScroll: {
+    maxHeight: "80%",
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: "flex-end",
+  },
   modalContent: {
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
     paddingBottom: 32,
-    maxHeight: "80%",
   },
   modalTitle: {
     fontSize: 20,
@@ -618,28 +1122,6 @@ const styles = StyleSheet.create({
   modalActions: {
     flexDirection: "row",
     gap: 12,
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  modalButtonCancel: {
-    backgroundColor: "#F2F2F7",
-  },
-  modalButtonCancelText: {
-    color: "#000",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  modalButtonSubmit: {
-    backgroundColor: "#007AFF",
-  },
-  modalButtonSubmitText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
   },
   loadingOverlay: {
     position: "absolute",
@@ -667,6 +1149,345 @@ const styles = StyleSheet.create({
     color: "#FF3B30",
     fontSize: 14,
     textAlign: "center",
+  },
+  modalPhotoSection: {
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  modalPhotoSectionTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 12,
+  },
+  modalPhotoButtons: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 12,
+  },
+  modalPhotoButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: "#F2F2F7",
+    borderWidth: 1,
+    borderColor: "#E5E5EA",
+    alignItems: "center",
+  },
+  modalPhotoButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#007AFF",
+  },
+  modalPhotoList: {
+    gap: 12,
+  },
+  modalPhotoItem: {
+    position: "relative",
+    marginRight: 12,
+  },
+  modalPhotoPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#F0F0F0",
+  },
+  modalPhotoRemove: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#FF3B30",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  modalPhotoRemoveText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
+  },
+  historyContainer: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 0,
+    alignItems: "flex-start",
+  },
+  historyList: {
+    gap: 12,
+    width: "100%",
+  },
+  requestCardRNE: {
+    marginBottom: 12,
+    padding: 0,
+    borderLeftWidth: 4,
+    borderRadius: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  requestCardHeader: {
+    padding: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    minHeight: 80,
+  },
+  requestHeaderLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  requestHeaderTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+    gap: 8,
+  },
+  requestStatusIcon: {
+    marginRight: 0,
+  },
+  requestMetaInfo: {
+    gap: 0,
+  },
+  requestAuthorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  requestAuthorInfo: {
+    flex: 1,
+  },
+  requestAuthor: {
+    fontSize: 14,
+    color: "#333",
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  requestTimeAgo: {
+    fontSize: 12,
+    color: "#999",
+  },
+  requestDateExpanded: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  requestDateExpandedText: {
+    fontSize: 12,
+    color: "#666",
+  },
+  requestHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  requestPhotoCountBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#E3F2FD",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    gap: 5,
+    borderWidth: 1,
+    borderColor: "#BBDEFB",
+  },
+  requestPhotoCountText: {
+    fontSize: 12,
+    color: "#1976D2",
+    fontWeight: "700",
+  },
+  requestCardExpandable: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    marginTop: 8,
+    paddingTop: 16,
+  },
+  requestCommentHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 6,
+  },
+  requestCommentLabel: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  requestCommentContainer: {
+    backgroundColor: "#F9F9F9",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: "#007AFF",
+  },
+  requestComment: {
+    fontSize: 14,
+    color: "#333",
+    lineHeight: 20,
+  },
+  requestPhotosHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 6,
+  },
+  requestPhotosLabel: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  secondaryButtonRNE: {
+    borderColor: "#E5E5EA",
+    backgroundColor: "#F2F2F7",
+  },
+  secondaryButtonContainer: {
+    flex: 1,
+    minWidth: "30%",
+  },
+  complainButtonRNEStyle: {
+    backgroundColor: "#FFF5F5",
+    borderColor: "#FFE5E5",
+  },
+  complainButtonTextRNEStyle: {
+    color: "#FF3B30",
+  },
+  modalButtonCancelRNE: {
+    backgroundColor: "#F2F2F7",
+    borderColor: "#E5E5EA",
+  },
+  modalButtonCancelTextRNE: {
+    color: "#000",
+  },
+  modalButtonSubmitRNE: {
+    backgroundColor: "#007AFF",
+  },
+  requestPhotosContainer: {
+    marginTop: 8,
+  },
+  requestPhotosList: {
+    gap: 8,
+  },
+  requestPhotoItem: {
+    width: 110,
+    height: 110,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#F0F0F0",
+    marginRight: 10,
+    position: "relative",
+    borderWidth: 1,
+    borderColor: "#E5E5EA",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  requestPhoto: {
+    width: "100%",
+    height: "100%",
+  },
+  requestPhotoOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  requestActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  requestActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: "#F2F2F7",
+    flex: 1,
+    justifyContent: "center",
+  },
+  requestActionText: {
+    fontSize: 14,
+    color: "#007AFF",
+    fontWeight: "600",
+  },
+  fullscreenPhotoContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenPhotoClose: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    zIndex: 1000,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenPhotoScroll: {
+    flex: 1,
+  },
+  fullscreenPhotoScrollContent: {
+    alignItems: "center",
+  },
+  fullscreenPhotoItem: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenPhotoImage: {
+    // Размеры устанавливаются динамически через style prop
+  },
+  fullscreenPhotoInfo: {
+    position: "absolute",
+    bottom: 40,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  fullscreenPhotoCounter: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
 });
 

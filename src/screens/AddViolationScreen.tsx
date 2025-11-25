@@ -3,8 +3,6 @@ import {
   View,
   StyleSheet,
   Text,
-  TextInput,
-  Button,
   FlatList,
   TouchableOpacity,
   Image,
@@ -14,6 +12,7 @@ import {
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
 import { PermissionsAndroid, Platform } from "react-native";
+import { Button, Input } from "@rneui/base";
 import { createViolation } from "../lib/api";
 
 type RootStackParamList = {
@@ -216,7 +215,7 @@ export default function AddViolationScreen() {
             <Text style={styles.coordsText}>
               {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
             </Text>
-            <Button title="Изменить" onPress={selectLocationOnMap} />
+            <Button title="Изменить" onPress={selectLocationOnMap} type="outline" size="sm" />
           </View>
         )}
       </View>
@@ -224,12 +223,13 @@ export default function AddViolationScreen() {
       {/* Описание */}
       <View style={styles.section}>
         <Text style={styles.label}>Описание</Text>
-        <TextInput
+        <Input
           multiline
           value={description}
           onChangeText={setDescription}
           placeholder="Например: незаконная свалка в лесу"
-          style={styles.descriptionInput}
+          inputStyle={{ minHeight: 100, textAlignVertical: "top" }}
+          containerStyle={{ paddingHorizontal: 0 }}
         />
       </View>
 
@@ -238,10 +238,8 @@ export default function AddViolationScreen() {
         <View style={styles.photosHeader}>
           <Text style={styles.label}>Фотографии ({photos.length})</Text>
           <View style={styles.photoButtonsRow}>
-            <View style={styles.photoButtonWrapper}>
-              <Button title="Сделать фото" onPress={addPhotoFromCamera} />
-            </View>
-            <Button title="Галерея" onPress={addPhotoFromGallery} />
+            <Button title="Сделать фото" onPress={addPhotoFromCamera} type="outline" containerStyle={{ marginRight: 8 }} />
+            <Button title="Галерея" onPress={addPhotoFromGallery} type="outline" />
           </View>
         </View>
 
@@ -302,6 +300,7 @@ export default function AddViolationScreen() {
           title={submitting ? "Отправка..." : "Отправить"}
           onPress={submitViolation}
           disabled={submitting || !coords || !description.trim()}
+          loading={submitting}
         />
       </View>
     </ScrollView>

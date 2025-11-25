@@ -377,6 +377,13 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   // Добавляем куки в заголовки
   await addCookiesToHeaders(url, headers);
   
+  // Для FormData НЕ устанавливаем Content-Type - React Native должен сделать это автоматически с boundary
+  // Если Content-Type был установлен где-то, удаляем его для FormData
+  if (init.body instanceof FormData) {
+    headers.delete("Content-Type");
+    console.log("[apiFetch] Removed Content-Type header for FormData (RN will set it with boundary)");
+  }
+  
   // Логируем все заголовки перед отправкой (для отладки)
   const headersObj: Record<string, string> = {};
   headers.forEach((value: string, key: string) => {
