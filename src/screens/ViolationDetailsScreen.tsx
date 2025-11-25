@@ -9,18 +9,20 @@ import {
   FlatList,
   Alert,
   Modal,
-  TextInput,
   Share,
   ActivityIndicator,
   Platform,
-  Dimensions,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
 import { PermissionsAndroid } from "react-native";
-import { Button, Card, Input, Badge, Avatar, Icon } from "@rneui/base";
-import type { Violation, ViolationRequest } from "../types/api";
+import { Button, Input, Icon } from "@rneui/base";
+import type { Violation } from "../types/api";
 import { getViolationById, closeViolationRequest } from "../lib/api";
+import GalleryTab from "../components/GalleryTab";
+import HistoryTab from "../components/HistoryTab";
+import ChatTab from "../components/ChatTab";
+import TabContent from "../components/TabContent";
 
 type RootStackParamList = {
   ViolationDetails: { violation: Violation; id?: string };
@@ -41,18 +43,7 @@ export default function ViolationDetailsScreen() {
   const [resolutionComment, setResolutionComment] = useState("");
   const [resolutionPhotos, setResolutionPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [submittingResolution, setSubmittingResolution] = useState(false);
-  const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
-  const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; index: number; photos: any[] } | null>(null);
-  const [screenDimensions, setScreenDimensions] = useState(Dimensions.get("window"));
   const isMountedRef = useRef(true);
-
-  // Обновление размеров экрана при изменении ориентации
-  useEffect(() => {
-    const subscription = Dimensions.addEventListener("change", ({ window }) => {
-      setScreenDimensions(window);
-    });
-    return () => subscription?.remove();
-  }, []);
 
   // Log lifecycle events and set mounted flag
   useEffect(() => {
@@ -311,127 +302,6 @@ export default function ViolationDetailsScreen() {
     return labels[type] || type;
   }, []);
 
-  const getRequestStatusLabel = useCallback((status: string) => {
-    const labels: Record<string, string> = {
-      open: "Создание",
-      partially_closed: "Частично решено",
-      closed: "Полностью решено",
-    };
-    return labels[status] || status;
-  }, []);
-
-  const getRequestStatusColor = useCallback((status: string) => {
-    const colors: Record<string, string> = {
-      open: "#34C759", // green
-      partially_closed: "#FF9500", // orange
-      closed: "#007AFF", // blue
-    };
-    return colors[status] || "#999";
-  }, []);
-
-  const getRequestStatusIcon = useCallback((status: string) => {
-    const icons: Record<string, string> = {
-      open: "note-add",
-      partially_closed: "hourglass-empty",
-      closed: "check-circle",
-    };
-    return icons[status] || "help-circle";
-  }, []);
-
-  const toggleRequestExpanded = useCallback((requestId: string) => {
-    setExpandedRequests((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(requestId)) {
-        newSet.delete(requestId);
-      } else {
-        newSet.add(requestId);
-      }
-      return newSet;
-    });
-  }, []);
-
-  const openFullscreenPhoto = useCallback((photo: any, photos: any[], index: number) => {
-    setFullscreenPhoto({ uri: photo.thumb_url || photo.url, index, photos });
-  }, []);
-
-  const closeFullscreenPhoto = useCallback(() => {
-    setFullscreenPhoto(null);
-  }, []);
-
-  const copyRequestInfo = useCallback(async (request: ViolationRequest) => {
-    const info = [
-      `Статус: ${getRequestStatusLabel(request.status)}`,
-      `Дата: ${formatDate(request.created_at)}`,
-      request.comment ? `Комментарий: ${request.comment}` : "",
-      request.photos && request.photos.length > 0 ? `Фото: ${request.photos.length}` : "",
-    ].filter(Boolean).join("\n");
-    
-    try {
-      // Используем Clipboard из React Native (если доступен) или Share
-      if (Platform.OS === "ios" || Platform.OS === "android") {
-        // Пробуем использовать встроенный Clipboard
-        const Clipboard = require("react-native").Clipboard;
-        if (Clipboard && Clipboard.setString) {
-          Clipboard.setString(info);
-          Alert.alert("Скопировано", "Информация о заявке скопирована");
-        } else {
-          // Fallback на Share
-          await Share.share({ message: info, title: "Информация о заявке" });
-        }
-      } else {
-        await Share.share({ message: info, title: "Информация о заявке" });
-      }
-    } catch (error: any) {
-      // Если Clipboard не доступен, используем Share
-      try {
-        await Share.share({ message: info, title: "Информация о заявке" });
-      } catch (shareError: any) {
-        if (shareError.message !== "User did not share") {
-          Alert.alert("Ошибка", "Не удалось скопировать информацию");
-        }
-      }
-    }
-  }, [getRequestStatusLabel, formatDate]);
-
-  const shareRequest = useCallback(async (request: ViolationRequest) => {
-    try {
-      const info = [
-        `Статус: ${getRequestStatusLabel(request.status)}`,
-        `Дата: ${formatDate(request.created_at)}`,
-        request.comment || "",
-      ].filter(Boolean).join("\n");
-      
-      await Share.share({
-        message: info,
-        title: "Информация о заявке",
-      });
-    } catch (error: any) {
-      if (error.message !== "User did not share") {
-        Alert.alert("Ошибка", "Не удалось поделиться");
-      }
-    }
-  }, [getRequestStatusLabel, formatDate]);
-
-  const formatTimeAgo = useCallback((dateStr?: string) => {
-    if (!dateStr) return "Дата неизвестна";
-    try {
-      const date = new Date(dateStr);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
-      const diffDays = Math.floor(diffMs / 86400000);
-
-      if (diffMins < 1) return "только что";
-      if (diffMins < 60) return `${diffMins} ${diffMins === 1 ? "минуту" : diffMins < 5 ? "минуты" : "минут"} назад`;
-      if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? "час" : diffHours < 5 ? "часа" : "часов"} назад`;
-      if (diffDays < 7) return `${diffDays} ${diffDays === 1 ? "день" : diffDays < 5 ? "дня" : "дней"} назад`;
-      
-      return formatDate(dateStr);
-    } catch {
-      return formatDate(dateStr);
-    }
-  }, [formatDate]);
 
   const photos = violation.photos || [];
   
@@ -516,224 +386,15 @@ export default function ViolationDetailsScreen() {
         </View>
 
         {/* Content - always mounted to prevent Fabric crashes */}
-        <View
-          style={[
-            styles.galleryContainer,
-            {
-              opacity: activeTab === "gallery" ? 1 : 0,
-              pointerEvents: activeTab === "gallery" ? "auto" : "none",
-            },
-          ]}
-        >
-          {/* FlatList always mounted to prevent Fabric crashes */}
-          <FlatList
-            data={photos.length > 0 ? photos : []}
-            numColumns={2}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const imageUri = item.thumb_url || item.url;
-              return (
-                <TouchableOpacity style={styles.photoItem} onPress={() => {}}>
-                  <Image
-                    source={{ uri: imageUri }}
-                    style={styles.photo}
-                    resizeMode="cover"
-                    onError={(e) => {
-                      if (isMountedRef.current) {
-                        console.error("[ViolationDetails] Image load error:", e.nativeEvent.error, "URI:", imageUri);
-                      }
-                    }}
-                    onLoad={() => {
-                      if (isMountedRef.current) {
-                        console.log("[ViolationDetails] Image loaded successfully:", imageUri);
-                      }
-                    }}
-                  />
-                </TouchableOpacity>
-              );
-            }}
-            scrollEnabled={false}
-            columnWrapperStyle={styles.photoRow}
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>Нет фотографий</Text>
-              </View>
-            }
-            removeClippedSubviews={false}
-          />
-        </View>
-        {/* History Container */}
-        <View
-          style={[
-            styles.historyContainer,
-            {
-              opacity: activeTab === "history" ? 1 : 0,
-              pointerEvents: activeTab === "history" ? "auto" : "none",
-            },
-          ]}
-        >
-          {violation.requests && violation.requests.length > 0 ? (
-            <View style={styles.historyList}>
-              {[...violation.requests]
-                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-                .map((item) => {
-                  const isExpanded = expandedRequests.has(item.id);
-                  const hasContent = (item.comment && item.comment.trim()) || (item.photos && item.photos.length > 0);
-                  return (
-                    <Card key={item.id} containerStyle={[styles.requestCardRNE, { borderLeftColor: getRequestStatusColor(item.status) }]}>
-                      {/* Header - всегда видимый */}
-                      <TouchableOpacity
-                        style={styles.requestCardHeader}
-                        onPress={() => hasContent && toggleRequestExpanded(item.id)}
-                        activeOpacity={hasContent ? 0.7 : 1}
-                      >
-                        <View style={styles.requestHeaderLeft}>
-                          <View style={styles.requestHeaderTop}>
-                            <Icon
-                              name={getRequestStatusIcon(item.status)}
-                              type="material"
-                              size={22}
-                              color={getRequestStatusColor(item.status)}
-                              containerStyle={styles.requestStatusIcon}
-                            />
-                            <Badge
-                              value={getRequestStatusLabel(item.status)}
-                              status="success"
-                              badgeStyle={{ 
-                                backgroundColor: getRequestStatusColor(item.status), 
-                                paddingHorizontal: 12, 
-                                paddingVertical: 5,
-                                borderRadius: 12,
-                              }}
-                              textStyle={{ fontSize: 12, fontWeight: "700", letterSpacing: 0.3 }}
-                            />
-                          </View>
-                          <View style={styles.requestMetaInfo}>
-                            <View style={styles.requestAuthorContainer}>
-                              <Avatar
-                                size={22}
-                                rounded
-                                title={item.created_by_user_id === violation.user_id ? "В" : String(item.created_by_user_id)[0]}
-                                containerStyle={{ backgroundColor: "#007AFF", marginRight: 8 }}
-                              />
-                              <View style={styles.requestAuthorInfo}>
-                                <Text style={styles.requestAuthor}>
-                                  {item.created_by_user_id === violation.user_id ? "Вы" : `ID ${item.created_by_user_id}`}
-                                </Text>
-                                <Text style={styles.requestTimeAgo}>{formatTimeAgo(item.created_at)}</Text>
-                              </View>
-                            </View>
-                          </View>
-                        </View>
-                        <View style={styles.requestHeaderRight}>
-                          {item.photos && item.photos.length > 0 && (
-                            <View style={styles.requestPhotoCountBadge}>
-                              <Icon name="photo-library" type="material" size={14} color="#1976D2" />
-                              <Text style={styles.requestPhotoCountText}>{item.photos.length}</Text>
-                            </View>
-                          )}
-                          {hasContent && (
-                            <Icon
-                              name={isExpanded ? "expand-less" : "expand-more"}
-                              type="material"
-                              size={24}
-                              color="#666"
-                            />
-                          )}
-                        </View>
-                      </TouchableOpacity>
-
-                      {/* Expandable content */}
-                      {isExpanded && hasContent && (
-                        <View style={styles.requestCardExpandable}>
-                          {/* Full date in expanded view */}
-                          <View style={styles.requestDateExpanded}>
-                            <Icon name="schedule" type="material" size={14} color="#999" />
-                            <Text style={styles.requestDateExpandedText}>{formatDate(item.created_at)}</Text>
-                          </View>
-                          {/* Comment */}
-                          {item.comment && item.comment.trim() && (
-                            <View style={styles.requestCommentContainer}>
-                              <View style={styles.requestCommentHeader}>
-                                <Icon name="comment" type="material" size={16} color="#666" />
-                                <Text style={styles.requestCommentLabel}>Комментарий</Text>
-                              </View>
-                              <Text style={styles.requestComment}>{item.comment}</Text>
-                            </View>
-                          )}
-                          {/* Photos */}
-                          {item.photos && item.photos.length > 0 && (
-                            <View style={styles.requestPhotosContainer}>
-                              <View style={styles.requestPhotosHeader}>
-                                <Icon name="photo-library" type="material" size={16} color="#666" />
-                                <Text style={styles.requestPhotosLabel}>Фотографии ({item.photos.length})</Text>
-                              </View>
-                              <ScrollView
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.requestPhotosList}
-                              >
-                                {item.photos.map((photo, photoIndex) => (
-                                  <TouchableOpacity
-                                    key={photo.id}
-                                    style={styles.requestPhotoItem}
-                                    onPress={() => openFullscreenPhoto(photo, item.photos || [], photoIndex)}
-                                  >
-                                    <Image
-                                      source={{ uri: photo.thumb_url || photo.url }}
-                                      style={styles.requestPhoto}
-                                      resizeMode="cover"
-                                    />
-                                    <View style={styles.requestPhotoOverlay}>
-                                      <Icon name="zoom-in" type="material" size={20} color="#FFFFFF" />
-                                    </View>
-                                  </TouchableOpacity>
-                                ))}
-                              </ScrollView>
-                            </View>
-                          )}
-                          {/* Actions */}
-                          <View style={styles.requestActions}>
-                            <TouchableOpacity
-                              style={styles.requestActionButton}
-                              onPress={() => shareRequest(item)}
-                            >
-                              <Icon name="share" type="material" size={18} color="#007AFF" />
-                              <Text style={styles.requestActionText}>Поделиться</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.requestActionButton}
-                              onPress={() => copyRequestInfo(item)}
-                            >
-                              <Icon name="content-copy" type="material" size={18} color="#007AFF" />
-                              <Text style={styles.requestActionText}>Копировать</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
-                    </Card>
-                  );
-                })}
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>История заявок пуста</Text>
-            </View>
-          )}
-        </View>
-        <View
-          style={[
-            styles.chatContainer,
-            {
-              opacity: activeTab === "chat" ? 1 : 0,
-              pointerEvents: activeTab === "chat" ? "auto" : "none",
-            },
-          ]}
-        >
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Чат будет доступен в ближайшее время</Text>
-          </View>
-        </View>
+        <TabContent active={activeTab === "gallery"}>
+          <GalleryTab photos={photos} isMountedRef={isMountedRef} />
+        </TabContent>
+        <TabContent active={activeTab === "history"}>
+          <HistoryTab violation={violation} isMountedRef={isMountedRef} />
+        </TabContent>
+        <TabContent active={activeTab === "chat"}>
+          <ChatTab />
+        </TabContent>
 
         {/* Primary Actions - Status buttons (always mounted to prevent Fabric crashes) */}
         <View
@@ -890,50 +551,6 @@ export default function ViolationDetailsScreen() {
         </View>
       </Modal>
 
-      {/* Fullscreen Photo Modal */}
-      <Modal
-        visible={fullscreenPhoto !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={closeFullscreenPhoto}
-      >
-        <View style={styles.fullscreenPhotoContainer}>
-          <TouchableOpacity
-            style={styles.fullscreenPhotoClose}
-            onPress={closeFullscreenPhoto}
-            activeOpacity={0.8}
-          >
-            <Icon name="close" type="material" size={32} color="#FFFFFF" />
-          </TouchableOpacity>
-          {fullscreenPhoto && (
-            <>
-              <ScrollView
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                contentOffset={{ x: fullscreenPhoto.index * screenDimensions.width, y: 0 }}
-                style={styles.fullscreenPhotoScroll}
-                contentContainerStyle={styles.fullscreenPhotoScrollContent}
-              >
-                {fullscreenPhoto.photos.map((photo, index) => (
-                  <View key={photo.id || index} style={[styles.fullscreenPhotoItem, { width: screenDimensions.width, height: screenDimensions.height }]}>
-                    <Image
-                      source={{ uri: photo.url || photo.thumb_url }}
-                      style={[styles.fullscreenPhotoImage, { width: screenDimensions.width, height: screenDimensions.height }]}
-                      resizeMode="contain"
-                    />
-                  </View>
-                ))}
-              </ScrollView>
-              <View style={styles.fullscreenPhotoInfo}>
-                <Text style={styles.fullscreenPhotoCounter}>
-                  {fullscreenPhoto.index + 1} / {fullscreenPhoto.photos.length}
-                </Text>
-              </View>
-            </>
-          )}
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -1023,31 +640,6 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: "#007AFF",
     fontWeight: "600",
-  },
-  galleryContainer: {
-    backgroundColor: "#FFFFFF",
-    padding: 12,
-    minHeight: 200,
-  },
-  photoRow: {
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  photoItem: {
-    width: "48%",
-    aspectRatio: 1,
-    borderRadius: 8,
-    overflow: "hidden",
-    backgroundColor: "#F0F0F0",
-  },
-  photo: {
-    width: "100%",
-    height: "100%",
-  },
-  chatContainer: {
-    backgroundColor: "#FFFFFF",
-    padding: 20,
-    minHeight: 200,
   },
   emptyState: {
     padding: 40,
@@ -1225,9 +817,13 @@ const styles = StyleSheet.create({
   historyList: {
     gap: 12,
     width: "100%",
+    marginTop: 0,
+    paddingTop: 0,
   },
   requestCardRNE: {
+    marginTop: 0,
     marginBottom: 12,
+    marginHorizontal: 0,
     padding: 0,
     borderLeftWidth: 4,
     borderRadius: 12,

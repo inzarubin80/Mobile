@@ -63,6 +63,11 @@ const theme = createTheme({
         shadowOpacity: 0.1,
         shadowRadius: 4,
         elevation: 3,
+        margin: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        marginHorizontal: 0,
+        marginVertical: 0,
       },
     },
     Input: {
