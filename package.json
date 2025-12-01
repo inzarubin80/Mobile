@@ -7,7 +7,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "check-android-fonts": "node scripts/check-android-fonts.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

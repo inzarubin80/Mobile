@@ -90,7 +90,7 @@ export default function AddViolationScreen() {
         
         if (uniqueNewPhotos.length < newPhotos.length) {
           const duplicates = newPhotos.length - uniqueNewPhotos.length;
-          console.warn(`[AddViolationScreen] Skipped ${duplicates} duplicate photo(s)`);
+          // skipped duplicate photos
         }
         
         return [...prev, ...uniqueNewPhotos];
@@ -138,7 +138,7 @@ export default function AddViolationScreen() {
           
           if (uniqueNewPhotos.length < newPhotos.length) {
             const duplicates = newPhotos.length - uniqueNewPhotos.length;
-            console.warn(`[AddViolationScreen] Skipped ${duplicates} duplicate photo(s)`);
+            // skipped duplicate photos
           }
           
           return [...prev, ...uniqueNewPhotos];
@@ -261,15 +261,11 @@ export default function AddViolationScreen() {
                   source={{ uri: item.uri }}
                   style={styles.photoPreview}
                   resizeMode="cover"
-                  onError={(e) => {
-                    if (isMountedRef.current) {
-                      console.warn("[AddViolationScreen] Image load error:", item.uri);
-                    }
+                  onError={() => {
+                    // image load error - silent
                   }}
                   onLoad={() => {
-                    if (isMountedRef.current) {
-                      console.log("[AddViolationScreen] Image loaded:", item.uri);
-                    }
+                    // image loaded - silent
                   }}
                 />
                 <TouchableOpacity onPress={() => {

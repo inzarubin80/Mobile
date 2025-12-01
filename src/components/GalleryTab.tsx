@@ -22,15 +22,11 @@ export default function GalleryTab({ photos, isMountedRef }: GalleryTabProps) {
                 source={{ uri: imageUri }}
                 style={styles.photo}
                 resizeMode="cover"
-                onError={(e) => {
-                  if (isMountedRef.current) {
-                    console.error("[GalleryTab] Image load error:", e.nativeEvent.error, "URI:", imageUri);
-                  }
+                onError={() => {
+                  // image load error - silent
                 }}
                 onLoad={() => {
-                  if (isMountedRef.current) {
-                    console.log("[GalleryTab] Image loaded successfully:", imageUri);
-                  }
+                  // image loaded - silent
                 }}
               />
             </TouchableOpacity>

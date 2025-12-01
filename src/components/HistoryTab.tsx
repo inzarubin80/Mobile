@@ -1,17 +1,5 @@
 import React, { useState, useCallback } from "react";
-import {
-  View,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Image,
-  ScrollView,
-  Alert,
-  Share,
-  Platform,
-  Dimensions,
-  Modal,
-} from "react-native";
+import { View, StyleSheet, Text, TouchableOpacity, Image, ScrollView, Dimensions, Modal } from "react-native";
 import { Card, Badge, Avatar, Icon } from "@rneui/base";
 import type { Violation, ViolationRequest } from "../types/api";
 
@@ -116,56 +104,6 @@ export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps)
   const closeFullscreenPhoto = useCallback(() => {
     setFullscreenPhoto(null);
   }, []);
-
-  const copyRequestInfo = useCallback(async (request: ViolationRequest) => {
-    const info = [
-      `Статус: ${getRequestStatusLabel(request.status)}`,
-      `Дата: ${formatDate(request.created_at)}`,
-      request.comment ? `Комментарий: ${request.comment}` : "",
-      request.photos && request.photos.length > 0 ? `Фото: ${request.photos.length}` : "",
-    ].filter(Boolean).join("\n");
-    
-    try {
-      if (Platform.OS === "ios" || Platform.OS === "android") {
-        const Clipboard = require("react-native").Clipboard;
-        if (Clipboard && Clipboard.setString) {
-          Clipboard.setString(info);
-          Alert.alert("Скопировано", "Информация о заявке скопирована");
-        } else {
-          await Share.share({ message: info, title: "Информация о заявке" });
-        }
-      } else {
-        await Share.share({ message: info, title: "Информация о заявке" });
-      }
-    } catch (error: any) {
-      try {
-        await Share.share({ message: info, title: "Информация о заявке" });
-      } catch (shareError: any) {
-        if (shareError.message !== "User did not share") {
-          Alert.alert("Ошибка", "Не удалось скопировать информацию");
-        }
-      }
-    }
-  }, [getRequestStatusLabel, formatDate]);
-
-  const shareRequest = useCallback(async (request: ViolationRequest) => {
-    try {
-      const info = [
-        `Статус: ${getRequestStatusLabel(request.status)}`,
-        `Дата: ${formatDate(request.created_at)}`,
-        request.comment || "",
-      ].filter(Boolean).join("\n");
-      
-      await Share.share({
-        message: info,
-        title: "Информация о заявке",
-      });
-    } catch (error: any) {
-      if (error.message !== "User did not share") {
-        Alert.alert("Ошибка", "Не удалось поделиться");
-      }
-    }
-  }, [getRequestStatusLabel, formatDate]);
 
   if (!violation.requests || violation.requests.length === 0) {
     return (
@@ -292,22 +230,6 @@ export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps)
                           </ScrollView>
                         </View>
                       )}
-                      <View style={styles.requestActions}>
-                        <TouchableOpacity
-                          style={styles.requestActionButton}
-                          onPress={() => shareRequest(item)}
-                        >
-                          <Icon name="share" type="material" size={18} color="#007AFF" />
-                          <Text style={styles.requestActionText}>Поделиться</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.requestActionButton}
-                          onPress={() => copyRequestInfo(item)}
-                        >
-                          <Icon name="content-copy" type="material" size={18} color="#007AFF" />
-                          <Text style={styles.requestActionText}>Копировать</Text>
-                        </TouchableOpacity>
-                      </View>
                     </View>
                   )}
                 </Card>
@@ -363,7 +285,7 @@ export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps)
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "transparent",
     paddingHorizontal: 12,
     paddingBottom: 12,
     paddingTop: 12,
@@ -543,30 +465,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.3)",
     justifyContent: "center",
     alignItems: "center",
-  },
-  requestActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 8,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  requestActionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: "#F2F2F7",
-    flex: 1,
-    justifyContent: "center",
-  },
-  requestActionText: {
-    fontSize: 14,
-    color: "#007AFF",
-    fontWeight: "600",
   },
   emptyState: {
     padding: 40,

@@ -28,7 +28,7 @@ export async function clearToken(): Promise<void> {
   try {
     await CookieManager.clearAll();
   } catch (error) {
-    console.warn("[clearToken] Failed to clear cookies:", error);
+    // failed to clear cookies - silent
   }
   DeviceEventEmitter.emit("auth:changed", { token: null });
 }
@@ -63,24 +63,13 @@ function generateRequestSignature(
   // Формируем строку для подписи: только timestamp
   const signString = String(timestamp);
   
-  // Логируем строку для подписи (для отладки)
-  console.log("[generateRequestSignature] Sign string (timestamp only):", signString);
-  console.log("[generateRequestSignature] Signature data:", {
-    timestamp: timestamp,
-    timestampType: typeof timestamp,
-    signString: signString
-  });
+  // signature string (timestamp only)
   
   // Генерируем HMAC-SHA256 подпись
   const signature = CryptoJS.HmacSHA256(signString, MOBILE_APP_SECRET);
   const base64Signature = CryptoJS.enc.Base64.stringify(signature);
   
-  console.log("[generateRequestSignature] Generated signature:", {
-    signature: base64Signature,
-    signatureLength: base64Signature.length,
-    secretLength: MOBILE_APP_SECRET.length,
-    secretFirstChars: MOBILE_APP_SECRET.substring(0, 5) + '...'
-  });
+  // generated signature
   
   return base64Signature;
 }
@@ -123,7 +112,7 @@ async function getCookieHeader(url: string): Promise<string> {
         cookies = await CookieManager.get(baseUrl, true);
         usedUrl = baseUrl;
         if (cookies && Object.keys(cookies).length > 0) {
-          console.log("[apiFetch] Found cookies for base URL:", baseUrl);
+          // found cookies for base URL
         }
       }
     }
@@ -136,7 +125,7 @@ async function getCookieHeader(url: string): Promise<string> {
         cookies = await CookieManager.get(domainUrl, true);
         usedUrl = domainUrl;
         if (cookies && Object.keys(cookies).length > 0) {
-          console.log("[apiFetch] Found cookies for domain:", domainUrl);
+          // found cookies for domain
         }
       }
     }
@@ -151,26 +140,10 @@ async function getCookieHeader(url: string): Promise<string> {
       })
       .join('; ');
     
-    // Логируем куки для refresh запросов
-    if (url.includes('/api/user/refresh')) {
-      console.log("[apiFetch] Cookies for refresh request:", {
-        requestedUrl: url,
-        usedUrl: usedUrl,
-        cookiesCount: Object.keys(cookies || {}).length,
-        cookies: Object.entries(cookies || {}).map(([name, cookie]) => ({
-          name,
-          value: typeof cookie === 'object' && cookie !== null && 'value' in cookie 
-            ? (cookie as any).value 
-            : cookie,
-          fullCookie: cookie
-        })),
-        cookieHeader: cookieHeader || '(empty)'
-      });
-    }
+    // do not log cookies
     
     return cookieHeader;
   } catch (error) {
-    console.warn("[apiFetch] Failed to get cookies:", error);
     return '';
   }
 }
@@ -192,7 +165,6 @@ async function saveCookiesFromResponse(url: string, res: Response): Promise<void
 
     const urlParts = parseUrl(url);
     if (!urlParts) {
-      console.warn("[apiFetch] Failed to parse URL:", url);
       return;
     }
     
@@ -294,54 +266,22 @@ async function saveCookiesFromResponse(url: string, res: Response): Promise<void
       // Сохраняем куку, используя полный URL (CookieManager требует полный URL)
       // Проверяем, что URL валидный (начинается с http:// или https://)
       if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
-        console.error("[apiFetch] Invalid URL format for cookie:", fullUrl);
         return;
       }
       
       try {
-        console.log("[apiFetch] Attempting to save cookie:", {
-          url: fullUrl,
-          cookieName: cookieData.name,
-          cookieData: { ...cookieData, value: cookieData.value.substring(0, 20) + '...' }
-        });
-        
         await CookieManager.set(fullUrl, cookieData);
-        
-        // Логируем сохранение кук для отладки
-        if (url.includes('/api/user/') || url.includes('/api/violations')) {
-          console.log("[apiFetch] Successfully saved cookie:", {
-            originalUrl: url,
-            savedForUrl: fullUrl,
-            name: cookieData.name,
-            domain: cookieData.domain,
-            path: cookieData.path,
-            httpOnly: cookieData.httpOnly,
-            secure: cookieData.secure,
-            sameSite: cookieData.sameSite
-          });
-        }
       } catch (error: any) {
-        console.error("[apiFetch] Failed to save cookie:", {
-          url: fullUrl,
-          cookieName: cookieData.name,
-          error: error?.message || String(error),
-          cookieDataKeys: Object.keys(cookieData)
-        });
         // Пробуем сохранить с базовым URL как fallback
         try {
-          console.log("[apiFetch] Trying to save cookie with base URL as fallback:", baseUrl);
           await CookieManager.set(baseUrl, cookieData);
-          console.log("[apiFetch] Successfully saved cookie with base URL as fallback");
         } catch (fallbackError: any) {
-          console.error("[apiFetch] Failed to save cookie with base URL too:", {
-            baseUrl,
-            error: fallbackError?.message || String(fallbackError)
-          });
+          // silent
         }
       }
     }
   } catch (error) {
-    console.warn("[apiFetch] Failed to save cookies from response:", error);
+    // silent
   }
 }
 
@@ -363,16 +303,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   headers.set("X-Mobile-Signature", signature);
   headers.set("X-Mobile-Timestamp", String(timestamp));
   
-  // Логируем данные для подписи (для отладки)
-  const urlPartsForLog = parseUrl(url);
-  const pathForLog = urlPartsForLog ? (urlPartsForLog.pathname || '/') + (url.includes('?') ? url.substring(url.indexOf('?')) : '') : url;
-  console.log("[apiFetch] Request signature data:", {
-    method,
-    url,
-    path: pathForLog,
-    timestamp,
-    signature: signature.substring(0, 20) + '...'
-  });
+  // Request signature data intentionally not logged (keep logs minimal)
   
   // Добавляем куки в заголовки
   await addCookiesToHeaders(url, headers);
@@ -381,21 +312,9 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   // Если Content-Type был установлен где-то, удаляем его для FormData
   if (init.body instanceof FormData) {
     headers.delete("Content-Type");
-    console.log("[apiFetch] Removed Content-Type header for FormData (RN will set it with boundary)");
   }
   
-  // Логируем все заголовки перед отправкой (для отладки)
-  const headersObj: Record<string, string> = {};
-  headers.forEach((value: string, key: string) => {
-    headersObj[key] = value;
-  });
-  console.log("[apiFetch] Sending request with headers:", {
-    url,
-    method: init.method || 'GET',
-    headers: headersObj,
-    hasBody: !!init.body,
-    bodyType: init.body ? (init.body instanceof FormData ? 'FormData' : typeof init.body) : 'none'
-  });
+  // Intentionally avoiding header/body logging to reduce noise
   
   // Сохраняем body для возможного повторного использования
   const originalBody = init.body;
@@ -404,37 +323,26 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   try {
     res = await fetch(input, { ...init, headers });
   } catch (error) {
-    console.error("[apiFetch] Network error:", {
-      url,
-      error: error instanceof Error ? error.message : String(error),
-      errorType: error instanceof Error ? error.constructor.name : typeof error
-    });
+    // Network errors are propagated without additional logging
     throw error;
   }
   
-  // Логируем ответ
-  console.log("[apiFetch] Response received:", {
-    url,
-    status: res.status,
-    statusText: res.statusText,
-    headers: Object.fromEntries(res.headers.entries())
-  });
+  // Avoid logging responses to keep console output limited
   
   // Сохраняем куки из ответа
   await saveCookiesFromResponse(url, res);
   
   // Если получили 401, пытаемся обновить токен и повторить запрос
   // НЕ делаем refresh для самого refresh endpoint, чтобы избежать рекурсии
-  if (res.status === 401 && !url.includes('/api/user/refresh')) {
-    console.log("[apiFetch] Got 401, attempting token refresh for:", url);
+    if (res.status === 401 && !url.includes('/api/user/refresh')) {
     const refreshTokenValue = await loadRefreshToken();
     
     // Всегда пытаемся сделать refresh, даже если нет refresh token в хранилище
     // В этом случае полагаемся на куки
     if (refreshTokenValue) {
-      console.log("[apiFetch] Refresh token found in storage, refreshing...");
+      // refresh token found
     } else {
-      console.log("[apiFetch] No refresh token in storage, attempting refresh with cookies...");
+      // no refresh token in storage
     }
     
     // Если уже идет refresh, ждем его завершения
@@ -459,48 +367,24 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
       res = await fetch(input, { ...init, body: originalBody, headers: newHeaders });
       // Сохраняем куки из ответа после повторного запроса
       await saveCookiesFromResponse(url, res);
-      console.log("[apiFetch] Retry after concurrent refresh, status:", res.status);
     } else {
       // Инициируем refresh
       refreshPromise = (async () => {
         try {
-          console.log("[apiFetch] Starting token refresh...");
-          // Передаем refreshTokenValue (может быть null) - в этом случае полагаемся на куки
+          // perform refresh
           const refreshResponse = await refreshToken(refreshTokenValue, API_BASE);
           const newAccessToken = refreshResponse.token || refreshResponse.access_token;
           const newRefreshToken = refreshResponse.refresh_token;
-          
-          console.log("[apiFetch] Refresh response processed:", {
-            hasAccessToken: !!newAccessToken,
-            hasRefreshToken: !!newRefreshToken,
-            accessTokenLength: newAccessToken?.length || 0
-          });
-          
+
           if (newAccessToken) {
             await saveToken(newAccessToken);
-            console.log("[apiFetch] New access token saved");
-            
             if (newRefreshToken) {
               await saveRefreshToken(newRefreshToken);
-              console.log("[apiFetch] New refresh token saved");
-            } else {
-              console.log("[apiFetch] No refresh token in response (server only returns token)");
             }
-            
-            console.log("[apiFetch] Token refreshed successfully");
             return newAccessToken;
           }
-          
-          console.error("[apiFetch] No token found in refresh response:", {
-            responseKeys: Object.keys(refreshResponse),
-            response: refreshResponse
-          });
-          throw new Error("No token in refresh response");
-        } catch (error) {
-          console.error("[apiFetch] Token refresh failed:", error);
-          // Если refresh не удался, очищаем все токены
           await clearToken();
-          throw error;
+          throw new Error("No token in refresh response");
         } finally {
           refreshPromise = null;
         }
@@ -527,9 +411,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
         res = await fetch(input, { ...init, body: originalBody, headers: newHeaders });
         // Сохраняем куки из ответа после повторного запроса
         await saveCookiesFromResponse(url, res);
-        console.log("[apiFetch] Retry after refresh, status:", res.status);
       } catch (error) {
-        console.error("[apiFetch] Error during refresh/retry:", error);
         // Если refresh не удался, возвращаем оригинальный 401 ответ
         return res;
       }

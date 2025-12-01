@@ -19,7 +19,6 @@ import { PermissionsAndroid } from "react-native";
 import { Button, Input, Icon } from "@rneui/base";
 import type { Violation } from "../types/api";
 import { getViolationById, closeViolationRequest } from "../lib/api";
-import GalleryTab from "../components/GalleryTab";
 import HistoryTab from "../components/HistoryTab";
 import ChatTab from "../components/ChatTab";
 import TabContent from "../components/TabContent";
@@ -37,20 +36,23 @@ export default function ViolationDetailsScreen() {
   const [violation, setViolation] = useState<Violation>(initialViolation);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"gallery" | "chat" | "history">("gallery");
+  const [activeTab, setActiveTab] = useState<"chat" | "history">("history");
   const [showResolutionForm, setShowResolutionForm] = useState(false);
   const [resolutionType, setResolutionType] = useState<"resolved" | "partially" | null>(null);
   const [resolutionComment, setResolutionComment] = useState("");
   const [resolutionPhotos, setResolutionPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [submittingResolution, setSubmittingResolution] = useState(false);
   const isMountedRef = useRef(true);
+  const [userVote, setUserVote] = useState<"like" | "dislike" | null>(null);
+  const [likesCount, setLikesCount] = useState(0);
+  const [dislikesCount, setDislikesCount] = useState(0);
 
   // Log lifecycle events and set mounted flag
   useEffect(() => {
-    console.log("[ViolationDetails] Component mounted");
+    // component mounted
     isMountedRef.current = true;
     return () => {
-      console.log("[ViolationDetails] Component unmounting");
+      // component unmounting
       isMountedRef.current = false;
     };
   }, []);
@@ -58,7 +60,7 @@ export default function ViolationDetailsScreen() {
   // Log navigation events
   useEffect(() => {
     const unsubscribe = navigation.addListener("beforeRemove", () => {
-      console.log("[ViolationDetails] Navigation: beforeRemove");
+      // navigation beforeRemove
       isMountedRef.current = false;
     });
     return unsubscribe;
@@ -67,8 +69,7 @@ export default function ViolationDetailsScreen() {
   // Load violation details on mount if we have an ID
   useEffect(() => {
     const violationId = id || initialViolation.id;
-    console.log("[ViolationDetails] Initial violation:", JSON.stringify(initialViolation, null, 2));
-    console.log("[ViolationDetails] Initial photos:", initialViolation.photos);
+    // initial violation loaded
     if (violationId) {
       setLoading(true);
       setError(null);
@@ -76,18 +77,14 @@ export default function ViolationDetailsScreen() {
         .then((data) => {
           // Check if component is still mounted before updating state
           if (!isMountedRef.current) {
-            console.log("[ViolationDetails] Component unmounted, skipping state update");
+            // component unmounted, skip
             return;
           }
-          console.log("[ViolationDetails] Loaded data:", JSON.stringify(data, null, 2));
-          console.log("[ViolationDetails] Loaded photos:", data.photos);
-          console.log("[ViolationDetails] Loaded requests:", data.requests);
+          // loaded data
           // Merge loaded data with initial data (initial takes precedence for fields like type, status)
           setViolation((prev) => {
             const merged = { ...prev, ...data, id: violationId };
-            console.log("[ViolationDetails] Merged violation:", JSON.stringify(merged, null, 2));
-            console.log("[ViolationDetails] Merged photos:", merged.photos);
-            console.log("[ViolationDetails] Merged requests:", merged.requests);
+            // merged violation
             return merged;
           });
           setLoading(false);
@@ -95,10 +92,10 @@ export default function ViolationDetailsScreen() {
         .catch((err) => {
           // Check if component is still mounted before updating state
           if (!isMountedRef.current) {
-            console.log("[ViolationDetails] Component unmounted, skipping error state update");
+            // component unmounted, skip error state update
             return;
           }
-          console.error("[ViolationDetails] Failed to load:", err);
+          // failed to load
           setError(err.message || "Не удалось загрузить данные");
           setLoading(false);
           // Keep initial violation data on error
@@ -108,11 +105,13 @@ export default function ViolationDetailsScreen() {
 
   // Показываем кнопки статусов только если проблема еще не решена
   // Новые статусы: new, confirmed, resolved, partially_resolved
-  const canMarkAsResolved = 
-    violation.status === "new" || 
-    violation.status === "confirmed" || 
-    violation.status === "in_progress" || 
+  const canMarkAsResolved =
+    violation.status === "new" ||
+    violation.status === "confirmed" ||
+    violation.status === "in_progress" ||
     !violation.status;
+
+  const showPrimaryActions = canMarkAsResolved && activeTab === "history";
 
   const handleComplain = useCallback(() => {
     Alert.alert("Пожаловаться", "Функция будет доступна в ближайшее время");
@@ -130,6 +129,38 @@ export default function ViolationDetailsScreen() {
   const handlePartiallyResolved = useCallback(() => {
     setResolutionType("partially");
     setShowResolutionForm(true);
+  }, []);
+
+  const handleLikePress = useCallback(() => {
+    setUserVote((prev) => {
+      if (prev === "like") {
+        setLikesCount((c) => Math.max(0, c - 1));
+        return null;
+      }
+      if (prev === "dislike") {
+        setDislikesCount((c) => Math.max(0, c - 1));
+        setLikesCount((c) => c + 1);
+        return "like";
+      }
+      setLikesCount((c) => c + 1);
+      return "like";
+    });
+  }, []);
+
+  const handleDislikePress = useCallback(() => {
+    setUserVote((prev) => {
+      if (prev === "dislike") {
+        setDislikesCount((c) => Math.max(0, c - 1));
+        return null;
+      }
+      if (prev === "like") {
+        setLikesCount((c) => Math.max(0, c - 1));
+        setDislikesCount((c) => c + 1);
+        return "dislike";
+      }
+      setDislikesCount((c) => c + 1);
+      return "dislike";
+    });
   }, []);
 
   const requestCameraPermission = useCallback(async (): Promise<boolean> => {
@@ -301,24 +332,6 @@ export default function ViolationDetailsScreen() {
     };
     return labels[type] || type;
   }, []);
-
-
-  const photos = violation.photos || [];
-  
-  // Log photos for debugging (only once per violation change)
-  useEffect(() => {
-    console.log("[ViolationDetails] Violation changed, photos:", photos.length);
-    if (photos.length > 0) {
-      photos.forEach((photo, idx) => {
-        console.log(`[ViolationDetails] Photo ${idx}:`, {
-          id: photo.id,
-          url: photo.url,
-          thumb_url: photo.thumb_url,
-        });
-      });
-    }
-  }, [violation.id, photos.length]);
-
   return (
     <View style={styles.container}>
       {/* Loading overlay - always mounted to prevent Fabric crashes */}
@@ -349,7 +362,9 @@ export default function ViolationDetailsScreen() {
                 <Text style={styles.typeText}>{getTypeLabel(violation.type)}</Text>
               </View>
             )}
-            <Text style={styles.date}>{formatDate(violation.created_at)}</Text>
+            <View style={styles.headerRight}>
+              <Text style={styles.date}>{formatDate(violation.created_at)}</Text>
+            </View>
           </View>
           <Text style={styles.coords}>
             {violation.lat.toFixed(6)}, {violation.lng.toFixed(6)}
@@ -357,24 +372,69 @@ export default function ViolationDetailsScreen() {
           {violation.description && (
             <Text style={styles.description}>{violation.description}</Text>
           )}
+
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[
+                styles.headerVoteButton,
+                userVote === "like" && styles.headerVoteButtonLikeActive,
+              ]}
+              onPress={handleLikePress}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon
+                name="thumb-up"
+                type="material"
+                size={16}
+                color={userVote === "like" ? "#34C759" : "#007AFF"}
+              />
+              {likesCount > 0 && (
+                <Text style={styles.headerVoteCount}>{likesCount}</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.headerVoteButton,
+                userVote === "dislike" && styles.headerVoteButtonDislikeActive,
+              ]}
+              onPress={handleDislikePress}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon
+                name="thumb-down"
+                type="material"
+                size={16}
+                color={userVote === "dislike" ? "#FF3B30" : "#007AFF"}
+              />
+              {dislikesCount > 0 && (
+                <Text style={styles.headerVoteCount}>{dislikesCount}</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerIconButton}
+              onPress={handleShare}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="share" type="material" color="#007AFF" size={18} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerComplainButton}
+              onPress={handleComplain}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="report-problem" type="material" color="#FF3B30" size={18} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tabs */}
         <View style={styles.tabs}>
           <TouchableOpacity
-            style={[styles.tab, activeTab === "gallery" && styles.tabActive]}
-            onPress={() => setActiveTab("gallery")}
-          >
-            <Text style={[styles.tabText, activeTab === "gallery" && styles.tabTextActive]}>
-              Галерея ({photos.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.tab, activeTab === "history" && styles.tabActive]}
             onPress={() => setActiveTab("history")}
           >
             <Text style={[styles.tabText, activeTab === "history" && styles.tabTextActive]}>
-              История {violation.requests && violation.requests.length > 0 ? `(${violation.requests.length})` : ""}
+              Действия {violation.requests && violation.requests.length > 0 ? `(${violation.requests.length})` : ""}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -386,9 +446,6 @@ export default function ViolationDetailsScreen() {
         </View>
 
         {/* Content - always mounted to prevent Fabric crashes */}
-        <TabContent active={activeTab === "gallery"}>
-          <GalleryTab photos={photos} isMountedRef={isMountedRef} />
-        </TabContent>
         <TabContent active={activeTab === "history"}>
           <HistoryTab violation={violation} isMountedRef={isMountedRef} />
         </TabContent>
@@ -401,9 +458,9 @@ export default function ViolationDetailsScreen() {
           style={[
             styles.primaryActions,
             {
-              opacity: canMarkAsResolved ? 1 : 0,
-              pointerEvents: canMarkAsResolved ? "auto" : "none",
-              height: canMarkAsResolved ? undefined : 0,
+              opacity: showPrimaryActions ? 1 : 0,
+              pointerEvents: showPrimaryActions ? "auto" : "none",
+              height: showPrimaryActions ? undefined : 0,
             },
           ]}
         >
@@ -417,32 +474,14 @@ export default function ViolationDetailsScreen() {
             title="~ Частично решено"
             onPress={handlePartiallyResolved}
             buttonStyle={{ backgroundColor: "#FF9500" }}
+            containerStyle={{ marginBottom: 12 }}
           />
-        </View>
-
-        {/* Secondary Actions */}
-        <View style={styles.secondaryActions}>
           <Button
-            title="Подписаться"
             onPress={handleSubscribe}
-            type="outline"
-            buttonStyle={styles.secondaryButtonRNE}
-            containerStyle={styles.secondaryButtonContainer}
-          />
-          <Button
-            title="Поделиться"
-            onPress={handleShare}
-            type="outline"
-            buttonStyle={styles.secondaryButtonRNE}
-            containerStyle={styles.secondaryButtonContainer}
-          />
-          <Button
-            title="Пожаловаться"
-            onPress={handleComplain}
-            type="outline"
-            buttonStyle={[styles.secondaryButtonRNE, styles.complainButtonRNEStyle]}
-            titleStyle={styles.complainButtonTextRNEStyle}
-            containerStyle={styles.secondaryButtonContainer}
+            title="Подписаться"
+            icon={<Icon name="notifications-active" type="material" color="#FFFFFF" size={20} />}
+            iconPosition="left"
+            buttonStyle={{ backgroundColor: "#007AFF" }}
           />
         </View>
       </ScrollView>
@@ -577,6 +616,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 24,
+    backgroundColor: "#F5F5F5",
   },
   header: {
     backgroundColor: "#FFFFFF",
@@ -589,6 +629,58 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 12,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    alignSelf: "center",
+    width: "80%",
+    maxWidth: 320,
+  },
+  headerVoteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F2F2F7",
+  },
+  headerVoteButtonLikeActive: {
+    backgroundColor: "#E3FCEC",
+  },
+  headerVoteButtonDislikeActive: {
+    backgroundColor: "#FFECEC",
+  },
+  headerVoteCount: {
+    marginLeft: 4,
+    fontSize: 12,
+    color: "#555",
+    fontWeight: "600",
+  },
+  headerIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F2F2F7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerComplainButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFF5F5",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FFE5E5",
   },
   typeBadge: {
     paddingHorizontal: 12,

@@ -54,17 +54,7 @@ export async function exchangeCode(input: ExchangeRequest, base?: string): Promi
     body: JSON.stringify(input),
   });
   
-  // Логируем куки, которые приходят в ответе (для отладки)
   const setCookieHeader = res.headers.get('Set-Cookie');
-  if (setCookieHeader) {
-    console.log("[exchangeCode] Cookies received in response:", {
-      url,
-      setCookieHeader: setCookieHeader,
-      status: res.status
-    });
-  } else {
-    console.log("[exchangeCode] No Set-Cookie header in response");
-  }
   
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -79,11 +69,7 @@ export async function refreshToken(refreshToken: string | null, base?: string): 
     ? JSON.stringify({ refresh_token: refreshToken })
     : JSON.stringify({});
   
-  console.log("[refreshToken] Making refresh request:", {
-    url: `${host}/api/user/refresh`,
-    hasRefreshTokenInBody: !!refreshToken,
-    body: refreshToken ? "{ refresh_token: '***' }" : "{}"
-  });
+  // refresh request
   
   // Используем apiFetch вместо fetch, чтобы куки автоматически отправлялись
   // apiFetch не будет делать refresh для /api/user/refresh (проверка в коде)
@@ -93,25 +79,12 @@ export async function refreshToken(refreshToken: string | null, base?: string): 
     body: body,
   });
   
-  console.log("[refreshToken] Refresh response status:", res.status);
-  
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    console.error("[refreshToken] Refresh failed:", {
-      status: res.status,
-      error: errText
-    });
     throw new Error(errText || `refresh failed (${res.status})`);
   }
   
-  // Парсим ответ и логируем его содержимое
   const responseData = await parseJsonSafe<ExchangeResponse>(res);
-  console.log("[refreshToken] Refresh response data:", {
-    hasToken: !!(responseData.token || responseData.access_token),
-    hasRefreshToken: !!responseData.refresh_token,
-    hasUserId: !!(responseData as any).user_id,
-    responseKeys: Object.keys(responseData)
-  });
   
   return responseData;
 }
@@ -135,44 +108,33 @@ export async function createViolation(params: CreateViolationParams, base?: stri
   form.append("lng", String(params.lng));
   if (typeof params.accuracy === "number") form.append("accuracy", String(params.accuracy));
   if (params.photos && params.photos.length) {
-    console.log("[createViolation] Adding photos:", params.photos.length);
     for (const p of params.photos) {
       const name = p.name || `photo_${Math.floor(Math.random() * 1e9)}.jpg`;
       const mime = p.type || "image/jpeg";
       // React Native file form: { uri, name, type }
       // @ts-ignore - RN FormData File value
-      form.append("photos[]", { uri: p.uri, name, type: mime });
-      console.log("[createViolation] Added photo:", { uri: p.uri.substring(0, 50) + "...", name, type: mime });
+      form.append("photos", { uri: p.uri, name, type: mime });
     }
   }
-  console.log("[createViolation] Sending request to:", `${host}/api/violations`);
-  // Use apiFetch to include Authorization automatically; don't set Content-Type to let RN add boundary
-  // Add timeout for FormData requests (60 seconds for file uploads)
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    console.error("[createViolation] Request timeout after 60 seconds");
-    controller.abort();
-  }, 60000);
-  
+  // Log array of photo URIs being sent
+  console.log(
+    "[createViolation] Photos to send:",
+    params.photos ? params.photos.map((p) => (p.uri ? p.uri : p.name || "<no-name>")) : []
+  );
+
   try {
     const res = await apiFetch(`${host}/api/violations`, {
       method: "POST",
       body: form as any,
-      signal: controller.signal,
     } as any);
-    clearTimeout(timeoutId);
-    
-    console.log("[createViolation] Response status:", res.status);
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(errText || `create violation failed (${res.status})`);
     }
     return parseJsonSafe<CreateViolationResponse>(res);
   } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error("Request timeout: загрузка заняла слишком много времени");
-    }
+    // No client-side timeout here; just propagate error
     throw error;
   }
 }
@@ -196,7 +158,6 @@ export async function getViolationsByBbox(
 export async function getViolationById(id: string, base?: string): Promise<Partial<Violation>> {
   const host = base || API_BASE;
   const url = `${host}/api/violations/${id}`;
-  console.log("[getViolationById] Fetching:", url);
   // Используем apiFetch для добавления необходимых заголовков (даже для публичных endpoint)
   const res = await apiFetch(url, { method: "GET" });
   if (res.status === 404) {
@@ -207,18 +168,6 @@ export async function getViolationById(id: string, base?: string): Promise<Parti
     throw new Error(errText || `get violation failed (${res.status})`);
   }
   const data = await parseJsonSafe<Partial<Violation>>(res);
-  console.log("[getViolationById] Raw response:", JSON.stringify(data, null, 2));
-  console.log("[getViolationById] Photos array:", data.photos);
-  console.log("[getViolationById] Photos count:", data.photos?.length || 0);
-  if (data.photos && data.photos.length > 0) {
-    data.photos.forEach((photo, idx) => {
-      console.log(`[getViolationById] Photo ${idx}:`, {
-        id: photo.id,
-        url: photo.url,
-        thumb_url: photo.thumb_url,
-      });
-    });
-  }
   // Ensure id is set from path parameter
   return { ...data, id };
 }
@@ -242,44 +191,33 @@ export async function closeViolationRequest(
     form.append("comment", params.comment);
   }
   if (params.photos && params.photos.length) {
-    console.log("[closeViolationRequest] Adding photos:", params.photos.length);
     for (const p of params.photos) {
       const name = p.name || `photo_${Math.floor(Math.random() * 1e9)}.jpg`;
       const mime = p.type || "image/jpeg";
       // React Native file form: { uri, name, type }
       // @ts-ignore - RN FormData File value
-      form.append("photos[]", { uri: p.uri, name, type: mime });
-      console.log("[closeViolationRequest] Added photo:", { uri: p.uri.substring(0, 50) + "...", name, type: mime });
+      form.append("photos", { uri: p.uri, name, type: mime });
     }
   }
-  console.log("[closeViolationRequest] Sending request to:", `${host}/api/violations/${violationId}/close-request`);
-  // Use apiFetch to include Authorization automatically; don't set Content-Type to let RN add boundary
-  // Add timeout for FormData requests (60 seconds for file uploads)
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    console.error("[closeViolationRequest] Request timeout after 60 seconds");
-    controller.abort();
-  }, 60000);
-  
+  // Log array of photo URIs being sent
+  console.log(
+    "[closeViolationRequest] Photos to send:",
+    params.photos ? params.photos.map((p) => (p.uri ? p.uri : p.name || "<no-name>")) : []
+  );
+
   try {
     const res = await apiFetch(`${host}/api/violations/${violationId}/close-request`, {
       method: "POST",
       body: form as any,
-      signal: controller.signal,
     } as any);
-    clearTimeout(timeoutId);
-    
-    console.log("[closeViolationRequest] Response status:", res.status);
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(errText || `close violation request failed (${res.status})`);
     }
     return parseJsonSafe<ViolationRequest>(res);
   } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error("Request timeout: загрузка заняла слишком много времени");
-    }
+    // No client-side timeout here; just propagate error
     throw error;
   }
 }

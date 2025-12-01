@@ -139,7 +139,6 @@ export default function MainScreen() {
       sendToMap({ type: "setViolations", items: markers });
     } catch (e) {
       // Игнорируем ошибки сети - пользователь может повторить, переместив карту
-      console.warn("[MainScreen] Failed to load violations:", e);
     }
   }, [sendToMap]);
 
@@ -167,7 +166,7 @@ export default function MainScreen() {
         }
       }
     } catch (e) {
-      console.warn("[MainScreen] Failed to parse map message:", e);
+      // failed to parse map message - silent
     }
   }, [violations, navigation, loadViolations]);
 

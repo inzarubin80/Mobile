@@ -48,10 +48,9 @@ export default function AuthScreen() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Lightweight debugger with consistent prefix
+  // Lightweight debugger - disabled in production
   const debug = useCallback((msg: string, extra?: any) => {
-    // eslint-disable-next-line no-console
-    console.log(`[AuthScreen] ${msg}`, extra ?? "");
+    // no-op
   }, []);
 
   useEffect(() => {
@@ -68,11 +67,10 @@ export default function AuthScreen() {
       const keys = (data || []).map((p) => p?.Provider).filter(Boolean);
       const duplicates = keys.filter((k, i) => keys.indexOf(k) !== i);
       if (duplicates.length) {
-        console.warn("[AuthScreen] duplicate provider keys detected:", Array.from(new Set(duplicates)));
+        // duplicate provider keys detected
       }
       setProviders(data);
     } catch (err: any) {
-      console.error("[AuthScreen] fetchProviders error:", err);
       Alert.alert(
         "Error loading providers",
         `${err?.message || "failed to load providers"}\nServer: ${API_BASE}`
@@ -109,7 +107,6 @@ export default function AuthScreen() {
       // open system browser with auth_url
       await Linking.openURL(auth_url);
     } catch (err: any) {
-      console.error("[AuthScreen] handleProviderPress error:", err);
       Alert.alert("Login error", err.message || String(err));
     } finally {
       setLoading(false);
@@ -137,17 +134,14 @@ export default function AuthScreen() {
       const oauthError = params["error"];
       const errorDesc = params["error_description"];
       if (oauthError) {
-        console.warn("[AuthScreen] oauth error:", oauthError, errorDesc);
         Alert.alert("OAuth error", decodeURIComponent(errorDesc || oauthError));
         return;
       }
       if (!code || !state) {
-        console.warn("[AuthScreen] redirect missing code/state");
         return;
       }
       const verifier = verifierByState.get(state);
       if (!verifier) {
-        console.warn("[AuthScreen] no verifier for state", state);
         // continue without code_verifier if server doesn't enforce it yet
       }
       setLoading(true);
@@ -169,7 +163,6 @@ export default function AuthScreen() {
       verifierByState.delete(state);
       Alert.alert("Success", "Authenticated successfully");
     } catch (err: any) {
-      console.error("[AuthScreen] handleRedirect error:", err);
       Alert.alert("Exchange error", err?.message || String(err));
     } finally {
       setLoading(false);
@@ -195,9 +188,6 @@ export default function AuthScreen() {
 
   const keyExtractor = useCallback((item: Provider, index: number) => {
     const key = item?.Provider ?? `idx-${index}`;
-    if (!item?.Provider) {
-      console.warn("[AuthScreen] missing Provider key at index", index, item);
-    }
     return key;
   }, []);
 
