@@ -361,3 +361,72 @@ export async function postViolationRequestComplaint(
   // 201/200 body is not used on mobile
 }
 
+// Profile API
+export async function getProfile(base?: string): Promise<any> {
+  const host = base || API_BASE;
+  const res = await apiFetch(`${host}/api/profile`, { method: "GET" });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `get profile failed (${res.status})`);
+  }
+  return parseJsonSafe<any>(res);
+}
+
+export async function updateProfile(input: Partial<{ display_name: string; boosty_url: string }>, base?: string): Promise<any> {
+  const host = base || API_BASE;
+  const res = await apiFetch(`${host}/api/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `update profile failed (${res.status})`);
+  }
+  return parseJsonSafe<any>(res);
+}
+
+export async function uploadProfileAvatar(file: { uri: string; name?: string; type?: string }, base?: string): Promise<{ avatar_url: string }> {
+  const host = base || API_BASE;
+  const form = new FormData();
+  // @ts-ignore RN file
+  form.append("avatar", { uri: file.uri, name: file.name || "avatar.jpg", type: file.type || "image/jpeg" } as any);
+  const res = await apiFetch(`${host}/api/profile/avatar`, {
+    method: "POST",
+    body: form as any,
+  } as any);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `upload profile avatar failed (${res.status})`);
+  }
+  return parseJsonSafe<{ avatar_url: string }>(res);
+}
+
+export async function linkAuthProvider(provider: string, code: string, codeVerifier: string, base?: string): Promise<any> {
+  const host = base || API_BASE;
+  const url = `${host}/api/profile/auth-providers/${encodeURIComponent(provider)}/link`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, code_verifier: codeVerifier }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `link auth provider failed (${res.status})`);
+  }
+  return parseJsonSafe<any>(res);
+}
+
+export async function unlinkAuthProvider(provider: string, base?: string): Promise<any> {
+  const host = base || API_BASE;
+  const url = `${host}/api/profile/auth-providers/${encodeURIComponent(provider)}/unlink`;
+  const res = await apiFetch(url, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `unlink auth provider failed (${res.status})`);
+  }
+  return parseJsonSafe<any>(res);
+}
+

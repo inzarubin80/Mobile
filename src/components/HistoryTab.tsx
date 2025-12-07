@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { View, StyleSheet, Text, TouchableOpacity, Image, ScrollView, Dimensions, Modal } from "react-native";
+import { View, StyleSheet, Text, TouchableOpacity, Image, ScrollView, Dimensions, Modal, Linking, Alert } from "react-native";
 import { Card, Badge, Avatar, Icon } from "@rneui/base";
 import type { Violation, ViolationRequest } from "../types/api";
+import { API_BASE } from "../lib/config";
 
 interface HistoryTabProps {
   violation: Violation;
@@ -114,6 +115,22 @@ export default function HistoryTab({
     setFullscreenPhoto(null);
   }, []);
 
+  const resolveAvatarUri = useCallback((raw?: string | null): string | null => {
+    if (!raw) return null;
+    let uri = raw;
+    if (raw.startsWith("/")) {
+      uri = `${API_BASE}${raw}`;
+    } else if (
+      !raw.startsWith("http://") &&
+      !raw.startsWith("https://") &&
+      !raw.startsWith("file://") &&
+      !raw.startsWith("content://")
+    ) {
+      uri = `${API_BASE}/${raw}`;
+    }
+    return uri;
+  }, []);
+
   if (!violation.requests || violation.requests.length === 0) {
     return (
       <View style={styles.container}>
@@ -134,6 +151,8 @@ export default function HistoryTab({
               const hasContent = (item.comment && item.comment.trim()) || (item.photos && item.photos.length > 0);
               const canShowActions =
                 item.status === "open" || item.status === "partially_closed" || item.status === "closed";
+              const isOwner = item.created_by_user_id === violation.user_id;
+              const avatarUri = resolveAvatarUri((item as any).author_avatar_url);
               return (
                 <Card key={item.id} containerStyle={[styles.requestCardRNE, { borderLeftColor: getRequestStatusColor(item.status) }]}>
                   <TouchableOpacity
@@ -164,14 +183,17 @@ export default function HistoryTab({
                       <View style={styles.requestMetaInfo}>
                         <View style={styles.requestAuthorContainer}>
                           <Avatar
-                            size={22}
+                            size={24}
                             rounded
-                            title={item.created_by_user_id === violation.user_id ? "В" : String(item.created_by_user_id)[0]}
+                            source={avatarUri ? { uri: avatarUri } : undefined}
+                            title={
+                              avatarUri ? undefined : isOwner ? "В" : String(item.created_by_user_id)[0]
+                            }
                             containerStyle={{ backgroundColor: "#007AFF", marginRight: 8 }}
                           />
                           <View style={styles.requestAuthorInfo}>
                             <Text style={styles.requestAuthor}>
-                              {item.created_by_user_id === violation.user_id ? "Вы" : `ID ${item.created_by_user_id}`}
+                              {isOwner ? "Вы" : `ID ${item.created_by_user_id}`}
                             </Text>
                             <Text style={styles.requestTimeAgo}>{formatTimeAgo(item.created_at)}</Text>
                           </View>
@@ -289,6 +311,23 @@ export default function HistoryTab({
                           >
                             <Icon name="report-problem" type="material" size={18} color="#FF3B30" />
                           </TouchableOpacity>
+
+                          {item.author_boosty_url ? (
+                            <TouchableOpacity
+                              style={styles.requestSupportButton}
+                              onPress={() => {
+                                const url = item.author_boosty_url;
+                                if (!url) return;
+                                Linking.openURL(url).catch(() => {
+                                  Alert.alert("Ошибка", "Не удалось открыть ссылку Boosty");
+                                });
+                              }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Icon name="favorite" type="material" size={18} color="#FF2D55" />
+                              <Text style={styles.requestSupportText}>Поддержать</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       )}
                     </View>
@@ -516,6 +555,22 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 12,
     color: "#555",
+    fontWeight: "600",
+  },
+  requestSupportButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFEFF4",
+    borderWidth: 1,
+    borderColor: "#FFD1E0",
+  },
+  requestSupportText: {
+    marginLeft: 6,
+    fontSize: 12,
+    color: "#C2185B",
     fontWeight: "600",
   },
   requestComplainButton: {

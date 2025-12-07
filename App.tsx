@@ -5,6 +5,7 @@ import MainScreen from "./src/screens/MainScreen";
 import AuthScreen from "./src/screens/AuthScreen";
 import ViolationDetailsScreen from "./src/screens/ViolationDetailsScreen";
 import AddViolationScreen from "./src/screens/AddViolationScreen";
+import ProfileEditScreen from "./src/screens/ProfileEditScreen";
 import { DeviceEventEmitter } from "react-native";
 import { loadToken, clearToken } from "./src/lib/auth";
 import { NavigationContainer } from "@react-navigation/native";
@@ -128,19 +129,41 @@ export default function App() {
                 <Stack.Screen
                   name="Main"
                   component={MainScreen}
-                  options={{
+                  options={({ navigation }) => ({
                     title: "Home",
                     headerRight: () => (
                       <Button
-                        title="Logout"
-                        onPress={async () => {
-                          await clearToken();
-                        }}
+                        title="Профиль"
                         type="clear"
+                        onPress={() => navigation.navigate("Profile")}
                         titleStyle={{ fontSize: 14 }}
                         buttonStyle={{ paddingHorizontal: 10 }}
                       />
                     ),
+                  })}
+                />
+                <Stack.Screen
+                  name="Profile"
+                  component={require("./src/screens/ProfileScreen").default}
+                  options={({ navigation }) => ({
+                    title: "Профиль",
+                    presentation: "card",
+                    headerRight: () => (
+                      <Button
+                        type="clear"
+                        icon={{ name: "settings", type: "material", color: "#007AFF", size: 22 }}
+                        onPress={() => navigation.navigate("ProfileEdit")}
+                        buttonStyle={{ paddingHorizontal: 8 }}
+                      />
+                    ),
+                  })}
+                />
+                <Stack.Screen
+                  name="ProfileEdit"
+                  component={ProfileEditScreen}
+                  options={{
+                    title: "Редактировать профиль",
+                    presentation: "card",
                   }}
                 />
                 <Stack.Screen

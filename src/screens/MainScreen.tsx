@@ -255,8 +255,8 @@ export default function MainScreen() {
       />
 
       {/* Кнопка геолокации - всегда видима */}
-      <TouchableOpacity 
-        onPress={moveToMyLocation} 
+      <TouchableOpacity
+        onPress={moveToMyLocation}
         style={styles.locationButton}
         activeOpacity={0.8}
       >

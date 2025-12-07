@@ -88,6 +88,8 @@ export interface ViolationRequest {
   violation_id: string;
   status: "open" | "partially_closed" | "closed";
   created_by_user_id: number;
+  // Optional avatar URL of the request author
+  author_avatar_url?: string | null;
   comment?: string;
   photos?: ViolationRequestPhoto[];
   created_at: string;
@@ -95,6 +97,8 @@ export interface ViolationRequest {
   likes?: number;
   dislikes?: number;
   user_vote?: "like" | "dislike" | "";
+   // Boosty link of the request author, if provided by backend
+   author_boosty_url?: string | null;
 }
 
 // Violation chat
@@ -113,6 +117,19 @@ export interface PaginatedViolationChatMessages {
   page: number;
   page_size: number;
   total: number;
+}
+
+// User profile
+export interface UserProfile {
+  id: number;
+  // Backend may return either "display_name" or "name"
+  display_name?: string;
+  name?: string;
+  avatar_url?: string | null;
+  boosty_url?: string | null;
+  connected_providers?: string[]; // e.g. ["yandex","google"]
+  // optional provider profile links
+  provider_profiles?: Record<string, string | null>;
 }
 
 // Violation votes
