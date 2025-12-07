@@ -95,49 +95,49 @@ export default function ChatTab({
       if (isMe) {
         return (
           <View style={[styles.messageRow, styles.messageRowMe]}>
-            <View style={styles.myMessageColumn}>
-              <View style={[styles.bubble, styles.bubbleMe]}>
-                <Text style={styles.authorLabel}>{displayName}</Text>
-                <Text style={styles.messageText}>{item.text}</Text>
+            <View style={[styles.bubble, styles.bubbleMe]}>
+              <Text style={styles.authorLabel}>{displayName}</Text>
+              <Text style={styles.messageText}>{item.text}</Text>
+              <View style={styles.myBubbleFooter}>
                 <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
-              </View>
-              <View style={styles.messageActionsRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setEditingMessageId(item.id);
-                    setInputValue(item.text);
-                  }}
-                  style={styles.messageActionButton}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Icon name="edit" type="material" size={18} color="#007AFF" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert(
-                      "Удалить сообщение",
-                      "Вы уверены, что хотите удалить это сообщение?",
-                      [
-                        { text: "Отмена", style: "cancel" },
-                        {
-                          text: "Удалить",
-                          style: "destructive",
-                          onPress: async () => {
-                            try {
-                              await onDeleteMessage(item.id);
-                            } catch {
-                              // ошибка уже обработана наверху
-                            }
+                <View style={styles.messageActionsRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingMessageId(item.id);
+                      setInputValue(item.text);
+                    }}
+                    style={styles.messageActionButton}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Icon name="edit" type="material" size={16} color="#007AFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Alert.alert(
+                        "Удалить сообщение",
+                        "Вы уверены, что хотите удалить это сообщение?",
+                        [
+                          { text: "Отмена", style: "cancel" },
+                          {
+                            text: "Удалить",
+                            style: "destructive",
+                            onPress: async () => {
+                              try {
+                                await onDeleteMessage(item.id);
+                              } catch {
+                                // ошибка уже обработана наверху
+                              }
+                            },
                           },
-                        },
-                      ]
-                    );
-                  }}
-                  style={styles.messageActionButton}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Icon name="delete-outline" type="material" size={18} color="#FF3B30" />
-                </TouchableOpacity>
+                        ]
+                      );
+                    }}
+                    style={styles.messageActionButton}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Icon name="delete-outline" type="material" size={16} color="#FF3B30" />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </View>
@@ -305,14 +305,17 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
     borderWidth: 1,
     borderColor: "#007AFF",
+    alignSelf: "flex-end",
   },
   bubbleOther: {
     backgroundColor: "#F2F2F7",
     borderBottomLeftRadius: 4,
   },
-  myMessageColumn: {
-    alignItems: "flex-end",
-    maxWidth: "85%",
+  myBubbleFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
   },
   authorLabel: {
     fontSize: 11,
@@ -328,7 +331,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#999",
     alignSelf: "flex-end",
-    marginTop: 4,
   },
   inputContainer: {
     flexDirection: "row",

@@ -17,8 +17,13 @@ import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { launchImageLibrary, launchCamera, Asset } from "react-native-image-picker";
 import { PermissionsAndroid } from "react-native";
 import { Button, Input, Icon } from "@rneui/base";
-import type { Violation } from "../types/api";
-import { getViolationById, closeViolationRequest } from "../lib/api";
+import type { Violation, ViolationRequest } from "../types/api";
+import {
+  getViolationById,
+  closeViolationRequest,
+  postViolationRequestVote,
+  postViolationRequestComplaint,
+} from "../lib/api";
 import HistoryTab from "../components/HistoryTab";
 import ChatTab from "../components/ChatTab";
 import { getCurrentUserIdFromToken } from "../lib/auth";
@@ -45,12 +50,41 @@ export default function ViolationDetailsScreen() {
   const [resolutionPhotos, setResolutionPhotos] = useState<Array<{ uri: string; name?: string; type?: string }>>([]);
   const [submittingResolution, setSubmittingResolution] = useState(false);
   const isMountedRef = useRef(true);
-  const [userVote, setUserVote] = useState<"like" | "dislike" | null>(null);
-  const [likesCount, setLikesCount] = useState(0);
-  const [dislikesCount, setDislikesCount] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const violationId = id || initialViolation.id || violation.id;
+
+  const handleRequestVoteUpdated = useCallback(
+    (payload: { violation_id: string; violation_request_id: string; likes: number; dislikes: number }) => {
+      console.log("[WS] violation_request_vote_updated", payload);
+
+      if (!payload || !payload.violation_request_id) return;
+      setViolation((prev) => {
+        if (!prev.requests) return prev;
+        const updated: Violation = {
+          ...prev,
+          requests: prev.requests.map((r) =>
+            r.id === payload.violation_request_id
+              ? { ...r, likes: payload.likes, dislikes: payload.dislikes }
+              : r
+          ),
+        };
+
+        console.log(
+          "[WS] AFTER vote_updated",
+          updated.requests?.map((r) => ({
+            id: r.id,
+            likes: r.likes,
+            dislikes: r.dislikes,
+            user_vote: r.user_vote,
+          }))
+        );
+
+        return updated;
+      });
+    },
+    []
+  );
 
   const {
     messages: chatMessages,
@@ -61,7 +95,7 @@ export default function ViolationDetailsScreen() {
     connecting: chatConnecting,
     error: chatError,
     sending: chatSending,
-  } = useViolationChat(violationId || "", currentUserId);
+  } = useViolationChat(violationId || "", currentUserId, { onRequestVoteUpdated: handleRequestVoteUpdated });
 
   // Log lifecycle events and set mounted flag
   useEffect(() => {
@@ -134,6 +168,23 @@ export default function ViolationDetailsScreen() {
     }
   }, [id, initialViolation.id, violationId]);
 
+  // Log requests with votes after loading violation
+  useEffect(() => {
+    if (!violation || !violation.requests || violation.requests.length === 0) return;
+
+    console.log(
+      "[ViolationDetails] GET /api/violations",
+      violation.id,
+      violation.requests.map((r) => ({
+        id: r.id,
+        status: r.status,
+        likes: r.likes,
+        dislikes: r.dislikes,
+        user_vote: r.user_vote,
+      }))
+    );
+  }, [violation.id, violation.requests]);
+
   // Показываем кнопки статусов только если проблема еще не решена
   // Новые статусы: new, confirmed, resolved, partially_resolved
   const canMarkAsResolved =
@@ -144,8 +195,18 @@ export default function ViolationDetailsScreen() {
 
   const showPrimaryActions = canMarkAsResolved && activeTab === "history";
 
-  const handleComplain = useCallback(() => {
-    Alert.alert("Пожаловаться", "Функция будет доступна в ближайшее время");
+  const handleViolationRequestComplain = useCallback((request: ViolationRequest) => {
+    if (!request.id) {
+      Alert.alert("Ошибка", "Не указан ID действия");
+      return;
+    }
+    postViolationRequestComplaint(request.id)
+      .then(() => {
+        Alert.alert("Жалоба отправлена", "Спасибо, мы рассмотрим обращение");
+      })
+      .catch((err: any) => {
+        Alert.alert("Ошибка", err?.message || "Не удалось отправить жалобу");
+      });
   }, []);
 
   const handleSubscribe = useCallback(() => {
@@ -162,36 +223,104 @@ export default function ViolationDetailsScreen() {
     setShowResolutionForm(true);
   }, []);
 
-  const handleLikePress = useCallback(() => {
-    setUserVote((prev) => {
-      if (prev === "like") {
-        setLikesCount((c) => Math.max(0, c - 1));
-        return null;
-      }
-      if (prev === "dislike") {
-        setDislikesCount((c) => Math.max(0, c - 1));
-        setLikesCount((c) => c + 1);
-        return "like";
-      }
-      setLikesCount((c) => c + 1);
-      return "like";
+  const handleViolationRequestLike = useCallback((request: ViolationRequest) => {
+    const currentVote =
+      request.user_vote === "like" || request.user_vote === "dislike" ? request.user_vote : "";
+    const nextValue: "like" | "dislike" | "none" = currentVote === "like" ? "none" : "like";
+
+    console.log("[Vote] LIKE click", {
+      requestId: request.id,
+      currentVote,
+      nextValue,
+      before: {
+        likes: request.likes,
+        dislikes: request.dislikes,
+        user_vote: request.user_vote,
+      },
     });
+
+    postViolationRequestVote(request.id, nextValue)
+      .then((resp) => {
+        console.log("[Vote] LIKE response", resp);
+
+        setViolation((prev) => {
+          if (!prev.requests) return prev;
+          const updated: Violation = {
+            ...prev,
+            requests: prev.requests.map((r) =>
+              r.id === resp.violation_request_id
+                ? { ...r, likes: resp.likes, dislikes: resp.dislikes, user_vote: resp.user_vote || "" }
+                : r
+            ),
+          };
+
+          console.log(
+            "[Vote] AFTER LIKE setViolation",
+            updated.requests?.map((r) => ({
+              id: r.id,
+              likes: r.likes,
+              dislikes: r.dislikes,
+              user_vote: r.user_vote,
+            }))
+          );
+
+          return updated;
+        });
+      })
+      .catch((err: any) => {
+        console.log("[Vote] LIKE error", err?.message || err);
+        Alert.alert("Ошибка", err?.message || "Не удалось отправить голос");
+      });
   }, []);
 
-  const handleDislikePress = useCallback(() => {
-    setUserVote((prev) => {
-      if (prev === "dislike") {
-        setDislikesCount((c) => Math.max(0, c - 1));
-        return null;
-      }
-      if (prev === "like") {
-        setLikesCount((c) => Math.max(0, c - 1));
-        setDislikesCount((c) => c + 1);
-        return "dislike";
-      }
-      setDislikesCount((c) => c + 1);
-      return "dislike";
+  const handleViolationRequestDislike = useCallback((request: ViolationRequest) => {
+    const currentVote =
+      request.user_vote === "like" || request.user_vote === "dislike" ? request.user_vote : "";
+    const nextValue: "like" | "dislike" | "none" = currentVote === "dislike" ? "none" : "dislike";
+
+    console.log("[Vote] DISLIKE click", {
+      requestId: request.id,
+      currentVote,
+      nextValue,
+      before: {
+        likes: request.likes,
+        dislikes: request.dislikes,
+        user_vote: request.user_vote,
+      },
     });
+
+    postViolationRequestVote(request.id, nextValue)
+      .then((resp) => {
+        console.log("[Vote] DISLIKE response", resp);
+
+        setViolation((prev) => {
+          if (!prev.requests) return prev;
+          const updated: Violation = {
+            ...prev,
+            requests: prev.requests.map((r) =>
+              r.id === resp.violation_request_id
+                ? { ...r, likes: resp.likes, dislikes: resp.dislikes, user_vote: resp.user_vote || "" }
+                : r
+            ),
+          };
+
+          console.log(
+            "[Vote] AFTER DISLIKE setViolation",
+            updated.requests?.map((r) => ({
+              id: r.id,
+              likes: r.likes,
+              dislikes: r.dislikes,
+              user_vote: r.user_vote,
+            }))
+          );
+
+          return updated;
+        });
+      })
+      .catch((err: any) => {
+        console.log("[Vote] DISLIKE error", err?.message || err);
+        Alert.alert("Ошибка", err?.message || "Не удалось отправить голос");
+      });
   }, []);
 
   const requestCameraPermission = useCallback(async (): Promise<boolean> => {
@@ -395,6 +524,13 @@ export default function ViolationDetailsScreen() {
             )}
             <View style={styles.headerRight}>
               <Text style={styles.date}>{formatDate(violation.created_at)}</Text>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={handleShare}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Icon name="share" type="material" color="#007AFF" size={18} />
+              </TouchableOpacity>
             </View>
           </View>
           <Text style={styles.coords}>
@@ -403,59 +539,6 @@ export default function ViolationDetailsScreen() {
           {violation.description && (
             <Text style={styles.description}>{violation.description}</Text>
           )}
-
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={[
-                styles.headerVoteButton,
-                userVote === "like" && styles.headerVoteButtonLikeActive,
-              ]}
-              onPress={handleLikePress}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon
-                name="thumb-up"
-                type="material"
-                size={16}
-                color={userVote === "like" ? "#34C759" : "#007AFF"}
-              />
-              {likesCount > 0 && (
-                <Text style={styles.headerVoteCount}>{likesCount}</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.headerVoteButton,
-                userVote === "dislike" && styles.headerVoteButtonDislikeActive,
-              ]}
-              onPress={handleDislikePress}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon
-                name="thumb-down"
-                type="material"
-                size={16}
-                color={userVote === "dislike" ? "#FF3B30" : "#007AFF"}
-              />
-              {dislikesCount > 0 && (
-                <Text style={styles.headerVoteCount}>{dislikesCount}</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIconButton}
-              onPress={handleShare}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon name="share" type="material" color="#007AFF" size={18} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerComplainButton}
-              onPress={handleComplain}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon name="report-problem" type="material" color="#FF3B30" size={18} />
-            </TouchableOpacity>
-          </View>
         </View>
 
         {/* Tabs */}
@@ -498,7 +581,13 @@ export default function ViolationDetailsScreen() {
 
         {/* Content - always mounted to prevent Fabric crashes */}
         <TabContent active={activeTab === "history"}>
-          <HistoryTab violation={violation} isMountedRef={isMountedRef} />
+          <HistoryTab
+            violation={violation}
+            isMountedRef={isMountedRef}
+            onRequestLike={handleViolationRequestLike}
+            onRequestDislike={handleViolationRequestDislike}
+            onRequestComplain={handleViolationRequestComplain}
+          />
         </TabContent>
         <TabContent active={activeTab === "chat"}>
           {violationId ? (

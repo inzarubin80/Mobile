@@ -16,7 +16,20 @@ interface UseViolationChatState {
   sending: boolean;
 }
 
-export function useViolationChat(violationId: string, currentUserId: number | null) {
+interface UseViolationChatOptions {
+  onRequestVoteUpdated?: (payload: {
+    violation_id: string;
+    violation_request_id: string;
+    likes: number;
+    dislikes: number;
+  }) => void;
+}
+
+export function useViolationChat(
+  violationId: string,
+  currentUserId: number | null,
+  options?: UseViolationChatOptions
+) {
   const [state, setState] = useState<UseViolationChatState>({
     messages: [],
     connected: false,
@@ -59,7 +72,7 @@ export function useViolationChat(violationId: string, currentUserId: number | nu
     };
   }, [violationId, setPartialState]);
 
-  const scheduleReconnect = useCallback(() => {
+  const scheduleReconnect = useCallback((reconnectFn: () => void) => {
     if (manuallyClosedRef.current) {
       return;
     }
@@ -71,7 +84,7 @@ export function useViolationChat(violationId: string, currentUserId: number | nu
     }
     reconnectTimeoutRef.current = setTimeout(() => {
       reconnectTimeoutRef.current = null;
-      connect();
+      reconnectFn();
     }, delay);
   }, []);
 
@@ -133,7 +146,7 @@ export function useViolationChat(violationId: string, currentUserId: number | nu
       try {
         const data = JSON.parse(event.data);
         if (!data) return;
-        const payload = data.payload as ViolationChatMessage | { id: string } | undefined;
+        const payload = data.payload as ViolationChatMessage | { id: string } | any;
         switch (data.type) {
           case "message":
             if (payload) {
@@ -150,6 +163,11 @@ export function useViolationChat(violationId: string, currentUserId: number | nu
               handleDeletedMessage((payload as any).id as string);
             }
             break;
+          case "violation_request_vote_updated":
+            if (options && typeof options.onRequestVoteUpdated === "function" && payload) {
+              options.onRequestVoteUpdated(payload as any);
+            }
+            break;
           default:
             break;
         }
@@ -160,13 +178,20 @@ export function useViolationChat(violationId: string, currentUserId: number | nu
 
     ws.onerror = () => {
       setPartialState({ error: "Ошибка соединения с чатом" });
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
     };
 
     ws.onclose = () => {
       wsRef.current = null;
       setPartialState({ connected: false, connecting: false });
       if (!manuallyClosedRef.current) {
-        scheduleReconnect();
+        scheduleReconnect(() => {
+          connect();
+        });
       }
     };
   }, [currentUserId, violationId, setPartialState, handleIncomingMessage, scheduleReconnect]);

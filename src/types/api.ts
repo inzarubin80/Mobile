@@ -92,6 +92,9 @@ export interface ViolationRequest {
   photos?: ViolationRequestPhoto[];
   created_at: string;
   updated_at: string;
+  likes?: number;
+  dislikes?: number;
+  user_vote?: "like" | "dislike" | "";
 }
 
 // Violation chat
@@ -110,6 +113,14 @@ export interface PaginatedViolationChatMessages {
   page: number;
   page_size: number;
   total: number;
+}
+
+// Violation votes
+export interface ViolationVotes {
+  violation_id: string;
+  likes: number;
+  dislikes: number;
+  user_vote?: "like" | "dislike" | "";
 }
 
 

@@ -309,4 +309,55 @@ export async function deleteViolationChatMessageHttp(
   // most likely 204/200 with empty body – ignore payload
 }
 
+// ViolationRequest votes & complaints
+
+export interface ViolationRequestVoteResponse {
+  violation_request_id: string;
+  likes: number;
+  dislikes: number;
+  user_vote?: "like" | "dislike" | "";
+}
+
+export async function postViolationRequestVote(
+  requestId: string,
+  value: "like" | "dislike" | "none",
+  base?: string
+): Promise<ViolationRequestVoteResponse> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violation-requests/${requestId}/vote`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `post violation request vote failed (${res.status})`);
+  }
+  return parseJsonSafe<ViolationRequestVoteResponse>(res);
+}
+
+export interface CreateViolationRequestComplaintParams {
+  reason?: string;
+  message?: string;
+}
+
+export async function postViolationRequestComplaint(
+  requestId: string,
+  params: CreateViolationRequestComplaintParams = {},
+  base?: string
+): Promise<void> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violation-requests/${requestId}/complaints`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `post violation request complaint failed (${res.status})`);
+  }
+  // 201/200 body is not used on mobile
+}
 

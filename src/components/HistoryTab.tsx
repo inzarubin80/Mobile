@@ -6,9 +6,18 @@ import type { Violation, ViolationRequest } from "../types/api";
 interface HistoryTabProps {
   violation: Violation;
   isMountedRef: React.MutableRefObject<boolean>;
+  onRequestLike: (request: ViolationRequest) => void;
+  onRequestDislike: (request: ViolationRequest) => void;
+  onRequestComplain: (request: ViolationRequest) => void;
 }
 
-export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps) {
+export default function HistoryTab({
+  violation,
+  isMountedRef,
+  onRequestLike,
+  onRequestDislike,
+  onRequestComplain,
+}: HistoryTabProps) {
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; index: number; photos: any[] } | null>(null);
   const [screenDimensions, setScreenDimensions] = useState(Dimensions.get("window"));
@@ -123,6 +132,8 @@ export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps)
           .map((item) => {
               const isExpanded = expandedRequests.has(item.id);
               const hasContent = (item.comment && item.comment.trim()) || (item.photos && item.photos.length > 0);
+              const canShowActions =
+                item.status === "open" || item.status === "partially_closed" || item.status === "closed";
               return (
                 <Card key={item.id} containerStyle={[styles.requestCardRNE, { borderLeftColor: getRequestStatusColor(item.status) }]}>
                   <TouchableOpacity
@@ -228,6 +239,56 @@ export default function HistoryTab({ violation, isMountedRef }: HistoryTabProps)
                               </TouchableOpacity>
                             ))}
                           </ScrollView>
+                        </View>
+                      )}
+
+                      {canShowActions && (
+                        <View style={styles.requestActionsRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.requestVoteButton,
+                              item.user_vote === "like" && styles.requestVoteButtonLikeActive,
+                            ]}
+                            onPress={() => onRequestLike(item)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Icon
+                              name="thumb-up"
+                              type="material"
+                              size={16}
+                              color={item.user_vote === "like" ? "#34C759" : "#007AFF"}
+                            />
+                            {(item.likes ?? 0) > 0 && (
+                              <Text style={styles.requestVoteCount}>{item.likes}</Text>
+                            )}
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.requestVoteButton,
+                              item.user_vote === "dislike" && styles.requestVoteButtonDislikeActive,
+                            ]}
+                            onPress={() => onRequestDislike(item)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Icon
+                              name="thumb-down"
+                              type="material"
+                              size={16}
+                              color={item.user_vote === "dislike" ? "#FF3B30" : "#007AFF"}
+                            />
+                            {(item.dislikes ?? 0) > 0 && (
+                              <Text style={styles.requestVoteCount}>{item.dislikes}</Text>
+                            )}
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.requestComplainButton}
+                            onPress={() => onRequestComplain(item)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Icon name="report-problem" type="material" size={18} color="#FF3B30" />
+                          </TouchableOpacity>
                         </View>
                       )}
                     </View>
@@ -429,6 +490,43 @@ const styles = StyleSheet.create({
     color: "#666",
     fontWeight: "600",
     textTransform: "uppercase",
+  },
+  requestActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    gap: 12,
+  },
+  requestVoteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F2F2F7",
+  },
+  requestVoteButtonLikeActive: {
+    backgroundColor: "#E3FCEC",
+  },
+  requestVoteButtonDislikeActive: {
+    backgroundColor: "#FFECEC",
+  },
+  requestVoteCount: {
+    marginLeft: 4,
+    fontSize: 12,
+    color: "#555",
+    fontWeight: "600",
+  },
+  requestComplainButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFF5F5",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FFE5E5",
   },
   requestPhotosContainer: {
     marginTop: 8,
