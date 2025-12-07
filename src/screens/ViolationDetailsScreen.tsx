@@ -56,12 +56,10 @@ export default function ViolationDetailsScreen() {
 
   const handleRequestVoteUpdated = useCallback(
     (payload: { violation_id: string; violation_request_id: string; likes: number; dislikes: number }) => {
-      console.log("[WS] violation_request_vote_updated", payload);
-
       if (!payload || !payload.violation_request_id) return;
       setViolation((prev) => {
         if (!prev.requests) return prev;
-        const updated: Violation = {
+        return {
           ...prev,
           requests: prev.requests.map((r) =>
             r.id === payload.violation_request_id
@@ -69,18 +67,6 @@ export default function ViolationDetailsScreen() {
               : r
           ),
         };
-
-        console.log(
-          "[WS] AFTER vote_updated",
-          updated.requests?.map((r) => ({
-            id: r.id,
-            likes: r.likes,
-            dislikes: r.dislikes,
-            user_vote: r.user_vote,
-          }))
-        );
-
-        return updated;
       });
     },
     []
@@ -168,23 +154,6 @@ export default function ViolationDetailsScreen() {
     }
   }, [id, initialViolation.id, violationId]);
 
-  // Log requests with votes after loading violation
-  useEffect(() => {
-    if (!violation || !violation.requests || violation.requests.length === 0) return;
-
-    console.log(
-      "[ViolationDetails] GET /api/violations",
-      violation.id,
-      violation.requests.map((r) => ({
-        id: r.id,
-        status: r.status,
-        likes: r.likes,
-        dislikes: r.dislikes,
-        user_vote: r.user_vote,
-      }))
-    );
-  }, [violation.id, violation.requests]);
-
   // Показываем кнопки статусов только если проблема еще не решена
   // Новые статусы: new, confirmed, resolved, partially_resolved
   const canMarkAsResolved =
@@ -228,24 +197,11 @@ export default function ViolationDetailsScreen() {
       request.user_vote === "like" || request.user_vote === "dislike" ? request.user_vote : "";
     const nextValue: "like" | "dislike" | "none" = currentVote === "like" ? "none" : "like";
 
-    console.log("[Vote] LIKE click", {
-      requestId: request.id,
-      currentVote,
-      nextValue,
-      before: {
-        likes: request.likes,
-        dislikes: request.dislikes,
-        user_vote: request.user_vote,
-      },
-    });
-
     postViolationRequestVote(request.id, nextValue)
       .then((resp) => {
-        console.log("[Vote] LIKE response", resp);
-
         setViolation((prev) => {
           if (!prev.requests) return prev;
-          const updated: Violation = {
+          return {
             ...prev,
             requests: prev.requests.map((r) =>
               r.id === resp.violation_request_id
@@ -253,22 +209,9 @@ export default function ViolationDetailsScreen() {
                 : r
             ),
           };
-
-          console.log(
-            "[Vote] AFTER LIKE setViolation",
-            updated.requests?.map((r) => ({
-              id: r.id,
-              likes: r.likes,
-              dislikes: r.dislikes,
-              user_vote: r.user_vote,
-            }))
-          );
-
-          return updated;
         });
       })
       .catch((err: any) => {
-        console.log("[Vote] LIKE error", err?.message || err);
         Alert.alert("Ошибка", err?.message || "Не удалось отправить голос");
       });
   }, []);
@@ -278,24 +221,11 @@ export default function ViolationDetailsScreen() {
       request.user_vote === "like" || request.user_vote === "dislike" ? request.user_vote : "";
     const nextValue: "like" | "dislike" | "none" = currentVote === "dislike" ? "none" : "dislike";
 
-    console.log("[Vote] DISLIKE click", {
-      requestId: request.id,
-      currentVote,
-      nextValue,
-      before: {
-        likes: request.likes,
-        dislikes: request.dislikes,
-        user_vote: request.user_vote,
-      },
-    });
-
     postViolationRequestVote(request.id, nextValue)
       .then((resp) => {
-        console.log("[Vote] DISLIKE response", resp);
-
         setViolation((prev) => {
           if (!prev.requests) return prev;
-          const updated: Violation = {
+          return {
             ...prev,
             requests: prev.requests.map((r) =>
               r.id === resp.violation_request_id
@@ -303,22 +233,9 @@ export default function ViolationDetailsScreen() {
                 : r
             ),
           };
-
-          console.log(
-            "[Vote] AFTER DISLIKE setViolation",
-            updated.requests?.map((r) => ({
-              id: r.id,
-              likes: r.likes,
-              dislikes: r.dislikes,
-              user_vote: r.user_vote,
-            }))
-          );
-
-          return updated;
         });
       })
       .catch((err: any) => {
-        console.log("[Vote] DISLIKE error", err?.message || err);
         Alert.alert("Ошибка", err?.message || "Не удалось отправить голос");
       });
   }, []);

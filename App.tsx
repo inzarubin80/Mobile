@@ -93,27 +93,18 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    console.log("[App] Component mounted");
     (async () => {
       const t = await loadToken();
-      console.log("[App] Token loaded:", t ? "exists" : "null");
       setToken(t);
       setReady(true);
-      console.log("[App] Ready state set to true");
     })();
     const sub = DeviceEventEmitter.addListener("auth:changed", (e: any) => {
-      console.log("[App] Auth changed event:", e?.token ? "token set" : "token cleared");
       setToken(e?.token || null);
     });
     return () => {
-      console.log("[App] Component unmounting");
       sub.remove();
     };
   }, []);
-
-  useEffect(() => {
-    console.log("[App] State changed - ready:", ready, "token:", token ? "exists" : "null");
-  }, [ready, token]);
 
   function SplashScreen() {
     return (
