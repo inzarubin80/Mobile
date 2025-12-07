@@ -94,4 +94,22 @@ export interface ViolationRequest {
   updated_at: string;
 }
 
+// Violation chat
+export interface ViolationChatMessage {
+  id: string;
+  violation_id: string;
+  user_id: number;
+  user_name?: string;
+  text: string;
+  is_system: boolean;
+  created_at: string;
+}
+
+export interface PaginatedViolationChatMessages {
+  items: ViolationChatMessage[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 

@@ -21,7 +21,9 @@ import type { Violation } from "../types/api";
 import { getViolationById, closeViolationRequest } from "../lib/api";
 import HistoryTab from "../components/HistoryTab";
 import ChatTab from "../components/ChatTab";
+import { getCurrentUserIdFromToken } from "../lib/auth";
 import TabContent from "../components/TabContent";
+import { useViolationChat } from "../hooks/useViolationChat";
 
 type RootStackParamList = {
   ViolationDetails: { violation: Violation; id?: string };
@@ -46,6 +48,20 @@ export default function ViolationDetailsScreen() {
   const [userVote, setUserVote] = useState<"like" | "dislike" | null>(null);
   const [likesCount, setLikesCount] = useState(0);
   const [dislikesCount, setDislikesCount] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
+  const violationId = id || initialViolation.id || violation.id;
+
+  const {
+    messages: chatMessages,
+    send: sendChatMessage,
+    updateMessage: updateChatMessage,
+    deleteMessage: deleteChatMessage,
+    connected: chatConnected,
+    connecting: chatConnecting,
+    error: chatError,
+    sending: chatSending,
+  } = useViolationChat(violationId || "", currentUserId);
 
   // Log lifecycle events and set mounted flag
   useEffect(() => {
@@ -54,6 +70,22 @@ export default function ViolationDetailsScreen() {
     return () => {
       // component unmounting
       isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserIdFromToken()
+      .then((uid) => {
+        if (!cancelled && typeof uid === "number") {
+          setCurrentUserId(uid);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -68,12 +100,11 @@ export default function ViolationDetailsScreen() {
 
   // Load violation details on mount if we have an ID
   useEffect(() => {
-    const violationId = id || initialViolation.id;
-    // initial violation loaded
-    if (violationId) {
+    const effectiveId = violationId;
+    if (effectiveId) {
       setLoading(true);
       setError(null);
-      getViolationById(violationId)
+      getViolationById(effectiveId)
         .then((data) => {
           // Check if component is still mounted before updating state
           if (!isMountedRef.current) {
@@ -83,7 +114,7 @@ export default function ViolationDetailsScreen() {
           // loaded data
           // Merge loaded data with initial data (initial takes precedence for fields like type, status)
           setViolation((prev) => {
-            const merged = { ...prev, ...data, id: violationId };
+            const merged = { ...prev, ...data, id: effectiveId };
             // merged violation
             return merged;
           });
@@ -101,7 +132,7 @@ export default function ViolationDetailsScreen() {
           // Keep initial violation data on error
         });
     }
-  }, [id, initialViolation.id]);
+  }, [id, initialViolation.id, violationId]);
 
   // Показываем кнопки статусов только если проблема еще не решена
   // Новые статусы: new, confirmed, resolved, partially_resolved
@@ -434,14 +465,34 @@ export default function ViolationDetailsScreen() {
             onPress={() => setActiveTab("history")}
           >
             <Text style={[styles.tabText, activeTab === "history" && styles.tabTextActive]}>
-              Действия {violation.requests && violation.requests.length > 0 ? `(${violation.requests.length})` : ""}
+              Действия{" "}
+              {violation.requests && violation.requests.length > 0
+                ? `(${violation.requests.length})`
+                : ""}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === "chat" && styles.tabActive]}
             onPress={() => setActiveTab("chat")}
           >
-            <Text style={[styles.tabText, activeTab === "chat" && styles.tabTextActive]}>Чат</Text>
+            <View style={styles.chatTabLabelRow}>
+              <Text style={[styles.tabText, activeTab === "chat" && styles.tabTextActive]}>Чат</Text>
+              <View style={styles.chatStatusBadge}>
+                <View
+                  style={[
+                    styles.chatStatusDot,
+                    chatConnecting
+                      ? styles.chatStatusDotConnecting
+                      : chatConnected
+                      ? styles.chatStatusDotOnline
+                      : styles.chatStatusDotOffline,
+                  ]}
+                />
+                <Text style={styles.chatStatusText}>
+                  {chatConnecting ? "Подключение..." : chatConnected ? "Онлайн" : "Офлайн"}
+                </Text>
+              </View>
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -450,7 +501,21 @@ export default function ViolationDetailsScreen() {
           <HistoryTab violation={violation} isMountedRef={isMountedRef} />
         </TabContent>
         <TabContent active={activeTab === "chat"}>
-          <ChatTab />
+          {violationId ? (
+            <ChatTab
+              messages={chatMessages}
+              currentUserId={currentUserId}
+              error={chatError}
+              sending={chatSending}
+              onSend={sendChatMessage}
+              onUpdateMessage={updateChatMessage}
+              onDeleteMessage={deleteChatMessage}
+            />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>ID нарушения не указан</Text>
+            </View>
+          )}
         </TabContent>
 
         {/* Primary Actions - Status buttons (always mounted to prevent Fabric crashes) */}
@@ -732,6 +797,38 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: "#007AFF",
     fontWeight: "600",
+  },
+  chatTabLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  chatStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "#F2F2F7",
+  },
+  chatStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 4,
+  },
+  chatStatusDotOnline: {
+    backgroundColor: "#34C759",
+  },
+  chatStatusDotOffline: {
+    backgroundColor: "#FF3B30",
+  },
+  chatStatusDotConnecting: {
+    backgroundColor: "#FF9500",
+  },
+  chatStatusText: {
+    fontSize: 11,
+    color: "#555",
   },
   emptyState: {
     padding: 40,

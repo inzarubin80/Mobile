@@ -1,4 +1,17 @@
-import { ExchangeRequest, ExchangeResponse, LoginResponse, Provider, ProvidersResponse, CreateViolationResponse, ViolationType, Violation, Paged, ViolationRequest } from "../types/api";
+import {
+  ExchangeRequest,
+  ExchangeResponse,
+  LoginResponse,
+  Provider,
+  ProvidersResponse,
+  CreateViolationResponse,
+  ViolationType,
+  Violation,
+  Paged,
+  ViolationRequest,
+  PaginatedViolationChatMessages,
+  ViolationChatMessage,
+} from "../types/api";
 import { API_BASE } from "./config";
 import { apiFetch } from "./auth";
 
@@ -220,6 +233,80 @@ export async function closeViolationRequest(
     // No client-side timeout here; just propagate error
     throw error;
   }
+}
+
+// Violation chat HTTP API
+
+export async function getViolationChatHistory(
+  violationId: string,
+  page = 1,
+  pageSize = 50,
+  base?: string
+): Promise<PaginatedViolationChatMessages> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violations/${violationId}/chat?page=${page}&page_size=${pageSize}`;
+  const res = await apiFetch(url, { method: "GET" });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `get violation chat history failed (${res.status})`);
+  }
+  return parseJsonSafe<PaginatedViolationChatMessages>(res);
+}
+
+export async function sendViolationChatMessageHttp(
+  violationId: string,
+  text: string,
+  base?: string
+): Promise<ViolationChatMessage> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violations/${violationId}/chat/messages`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `send violation chat message failed (${res.status})`);
+  }
+  return parseJsonSafe<ViolationChatMessage>(res);
+}
+
+export async function updateViolationChatMessageHttp(
+  violationId: string,
+  messageId: string,
+  text: string,
+  base?: string
+): Promise<ViolationChatMessage> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violations/${violationId}/chat/messages/${messageId}`;
+  const res = await apiFetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `update violation chat message failed (${res.status})`);
+  }
+  return parseJsonSafe<ViolationChatMessage>(res);
+}
+
+export async function deleteViolationChatMessageHttp(
+  violationId: string,
+  messageId: string,
+  base?: string
+): Promise<void> {
+  const host = base || API_BASE;
+  const url = `${host}/api/violations/${violationId}/chat/messages/${messageId}`;
+  const res = await apiFetch(url, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `delete violation chat message failed (${res.status})`);
+  }
+  // most likely 204/200 with empty body – ignore payload
 }
 
 

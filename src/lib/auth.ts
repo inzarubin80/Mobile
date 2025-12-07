@@ -8,6 +8,8 @@ import { API_BASE, MOBILE_APP_SECRET } from "./config";
 const TOKEN_KEY = "@auth/token";
 const REFRESH_TOKEN_KEY = "@auth/refresh_token";
 
+let cachedUserId: number | null | undefined;
+
 export async function saveToken(token: string): Promise<void> {
   await AsyncStorage.setItem(TOKEN_KEY, token);
   DeviceEventEmitter.emit("auth:changed", { token });
@@ -47,6 +49,47 @@ export async function loadRefreshToken(): Promise<string | null> {
 
 export async function clearRefreshToken(): Promise<void> {
   await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((base64Url.length + 3) % 4);
+    const globalAtob: ((input: string) => string) | undefined = (globalThis as any).atob;
+    if (!globalAtob) {
+      return null;
+    }
+    const json = globalAtob(base64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+export async function getCurrentUserIdFromToken(): Promise<number | null> {
+  if (typeof cachedUserId === "number") {
+    return cachedUserId;
+  }
+  const token = await loadToken();
+  if (!token) {
+    cachedUserId = null;
+    return null;
+  }
+  const payload = decodeJwtPayload(token);
+  if (!payload) {
+    cachedUserId = null;
+    return null;
+  }
+  const raw = typeof payload.user_id !== "undefined" ? payload.user_id : payload.sub;
+  const num = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(num)) {
+    cachedUserId = null;
+    return null;
+  }
+  cachedUserId = num;
+  return num;
 }
 
 // Promise для синхронизации конкурентных refresh запросов
